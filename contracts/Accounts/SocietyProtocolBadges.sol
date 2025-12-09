@@ -1,70 +1,130 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.28;
 
-import "@openzeppelin/contracts/token/ERC1155/ERC1155.sol";
-import "@openzeppelin/contracts/access/AccessControl.sol";
-import "@openzeppelin/contracts/token/ERC1155/extensions/ERC1155Supply.sol";
-import "./Transferability/ITransferabilityStrategy.sol";
-import "./Transferability/SoulboundStrategy.sol";
-import "./Transferability/TransferableStrategy.sol";
+import "@openzeppelin/contracts-upgradeable/token/ERC1155/ERC1155Upgradeable.sol";
+import "@openzeppelin/contracts-upgradeable/access/AccessControlUpgradeable.sol";
+import "@openzeppelin/contracts-upgradeable/token/ERC1155/extensions/ERC1155SupplyUpgradeable.sol";
+import "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
+import "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
+import "./ISocietyBadgeHook.sol";
 
-contract SocietyProtocolBadges is ERC1155, AccessControl, ERC1155Supply {
+/// @title Society Protocol Badges
+/// @notice Manages badges and user profiles for the Society Protocol
+/// @dev Implements ERC1155 with AccessControl, UUPS Upgradeability, and custom hooks
+contract SocietyProtocolBadges is 
+    Initializable, 
+    ERC1155Upgradeable, 
+    AccessControlUpgradeable, 
+    ERC1155SupplyUpgradeable, 
+    UUPSUpgradeable 
+{
     bytes32 public constant GOVERNOR_ROLE = keccak256("GOVERNOR_ROLE");
     bytes32 public constant MINTER_ROLE = keccak256("MINTER_ROLE");
 
     struct BadgeInfo {
         string name;
         bool isOfficial;
-        address strategy;
         string metadataURI;
     }
 
     mapping(uint256 => BadgeInfo) public badges;
+    
+    // badgeId => operator => allowed
+    mapping(uint256 => mapping(address => bool)) public canMint;
+    mapping(uint256 => mapping(address => bool)) public canTransfer;
+    mapping(uint256 => mapping(address => bool)) public canBurn;
+
+    // badgeId => hook address
+    mapping(uint256 => address) public badgeHooks;
+
+    // user => profileBadgeId
+    mapping(address => uint256) public userProfileId;
+
     uint256 public nextTokenId;
 
-    event BadgeCreated(uint256 indexed id, string name, bool isOfficial, address strategy);
+    event BadgeCreated(uint256 indexed id, string name, bool isOfficial);
+    event PermissionsUpdated(uint256 indexed id, address indexed operator, bool mint, bool transfer, bool burn);
+    event HookUpdated(uint256 indexed id, address indexed hook);
+    event ProfileCreated(address indexed user, uint256 indexed id);
 
-    constructor() ERC1155("") {
-        _grantRole(DEFAULT_ADMIN_ROLE, msg.sender);
-        _grantRole(GOVERNOR_ROLE, msg.sender);
+    // Custom Errors
+    error Unauthorized();
+    error BadgeDoesNotExist();
+    error NotProfileOwner();
+    error ProfileAlreadyExists();
+    error MintDeniedByHook();
+    error TransferDeniedByHook();
+    error BurnDeniedByHook();
+    error MintNotAuthorized();
+    error TransferNotAuthorized();
+    error BurnNotAuthorized();
 
-        // Deploy default strategies
-        SoulboundStrategy soulbound = new SoulboundStrategy();
-        TransferableStrategy transferable = new TransferableStrategy();
-
-        // Preconfigure 3 official badges
-        // ID 1: Official Member (Soulbound)
-        _createBadge("Official Member", true, address(soulbound), "ipfs://official-member");
-        
-        // ID 2: Community Partner (Transferable)
-        _createBadge("Community Partner", true, address(transferable), "ipfs://community-partner");
-
-        // ID 3: VIP Access (Soulbound)
-        _createBadge("VIP Access", true, address(soulbound), "ipfs://vip-access");
+    /// @custom:oz-upgrades-unsafe-allow constructor
+    constructor() {
+        _disableInitializers();
     }
 
-    function createBadge(
-        string memory name,
-        address strategy,
-        string memory metadataURI
-    ) external returns (uint256) {
-        bool isOfficial;
-        if (hasRole(GOVERNOR_ROLE, msg.sender)) {
-            isOfficial = true;
-        } else if (hasRole(MINTER_ROLE, msg.sender)) {
-            isOfficial = false;
-        } else {
-            revert("Caller is not authorized to create badges");
-        }
+    function initialize() public initializer {
+        __ERC1155_init("");
+        __AccessControl_init();
+        __ERC1155Supply_init();
+        __UUPSUpgradeable_init();
 
-        return _createBadge(name, isOfficial, strategy, metadataURI);
+        _grantRole(DEFAULT_ADMIN_ROLE, msg.sender);
+        _grantRole(GOVERNOR_ROLE, msg.sender);
+    }
+
+    /// @notice Creates a new official badge
+    /// @dev Only callable by GOVERNOR_ROLE
+    function createOfficialBadge(
+        string memory name,
+        string memory metadataURI,
+        address[] calldata minters,
+        address[] calldata transferers,
+        address[] calldata burners
+    ) external onlyRole(GOVERNOR_ROLE) returns (uint256) {
+        return _createBadge(name, true, metadataURI, minters, transferers, burners);
+    }
+
+    /// @notice Creates a new community badge
+    /// @dev Only callable by MINTER_ROLE
+    function createCommunityBadge(
+        string memory name,
+        string memory metadataURI,
+        address[] calldata minters,
+        address[] calldata transferers,
+        address[] calldata burners
+    ) external onlyRole(MINTER_ROLE) returns (uint256) {
+        return _createBadge(name, false, metadataURI, minters, transferers, burners);
+    }
+
+    /// @notice Creates a unique profile badge for the caller
+    /// @dev One profile per address
+    function createProfile(string memory metadataURI) external returns (uint256) {
+        if (userProfileId[msg.sender] != 0) revert ProfileAlreadyExists();
+
+        address[] memory empty = new address[](0);
+        
+        // Create the badge type
+        uint256 id = _createBadge("Profile", false, metadataURI, empty, empty, empty);
+        
+        // Grant temporary mint permission to msg.sender so _update check passes
+        canMint[id][msg.sender] = true;
+        _mint(msg.sender, id, 1, "");
+        canMint[id][msg.sender] = false; // Revoke immediately
+
+        userProfileId[msg.sender] = id;
+        emit ProfileCreated(msg.sender, id);
+        return id;
     }
 
     function _createBadge(
         string memory name,
         bool isOfficial,
-        address strategy,
-        string memory metadataURI
+        string memory metadataURI,
+        address[] memory minters,
+        address[] memory transferers,
+        address[] memory burners
     ) internal returns (uint256) {
         nextTokenId++;
         uint256 id = nextTokenId;
@@ -72,12 +132,31 @@ contract SocietyProtocolBadges is ERC1155, AccessControl, ERC1155Supply {
         badges[id] = BadgeInfo({
             name: name,
             isOfficial: isOfficial,
-            strategy: strategy,
             metadataURI: metadataURI
         });
 
-        emit BadgeCreated(id, name, isOfficial, strategy);
+        for (uint256 i = 0; i < minters.length; i++) {
+            canMint[id][minters[i]] = true;
+            emit PermissionsUpdated(id, minters[i], true, false, false);
+        }
+        for (uint256 i = 0; i < transferers.length; i++) {
+            canTransfer[id][transferers[i]] = true;
+            emit PermissionsUpdated(id, transferers[i], false, true, false);
+        }
+        for (uint256 i = 0; i < burners.length; i++) {
+            canBurn[id][burners[i]] = true;
+            emit PermissionsUpdated(id, burners[i], false, false, true);
+        }
+
+        emit BadgeCreated(id, name, isOfficial);
         return id;
+    }
+
+    /// @notice Sets a hook contract for a specific badge
+    /// @dev Only callable by GOVERNOR_ROLE
+    function setBadgeHook(uint256 id, address hook) external onlyRole(GOVERNOR_ROLE) {
+        badgeHooks[id] = hook;
+        emit HookUpdated(id, hook);
     }
 
     function mint(
@@ -86,26 +165,24 @@ contract SocietyProtocolBadges is ERC1155, AccessControl, ERC1155Supply {
         uint256 amount,
         bytes memory data
     ) public {
-        require(id <= nextTokenId, "Badge does not exist");
-        BadgeInfo memory badge = badges[id];
-        
-        // Only Governor can mint official badges
-        if (badge.isOfficial) {
-            require(hasRole(GOVERNOR_ROLE, msg.sender), "Only Governor can mint official badges");
-        } else {
-            // Minter role or badge creator logic could go here, for now restricted to MINTER_ROLE for simplicity
-             require(hasRole(MINTER_ROLE, msg.sender) || hasRole(GOVERNOR_ROLE, msg.sender), "Not authorized to mint");
-        }
-
-        if (badge.strategy != address(0)) {
-            require(ITransferabilityStrategy(badge.strategy).canMint(msg.sender, to, id, amount), "Minting not allowed by strategy");
-        }
-
+        if (id > nextTokenId) revert BadgeDoesNotExist();
+        // Permission check is done in _update
         _mint(to, id, amount, data);
     }
 
-    function setURI(uint256 id, string memory newUri) external {
-        require(hasRole(GOVERNOR_ROLE, msg.sender), "Only Governor can set URI");
+    /// @notice Updates the metadata URI for a badge
+    /// @dev Only callable by GOVERNOR_ROLE
+    function setURI(uint256 id, string memory newUri) external onlyRole(GOVERNOR_ROLE) {
+        badges[id].metadataURI = newUri;
+        emit URI(newUri, id);
+    }
+
+    /// @notice Updates the metadata URI for a user's profile
+    /// @dev Only callable by the profile owner
+    function updateProfileURI(uint256 id, string memory newUri) external {
+        // Allow update if sender owns the token and it's a unique NFT (Profile)
+        if (totalSupply(id) != 1 || balanceOf(msg.sender, id) != 1) revert NotProfileOwner();
+        
         badges[id].metadataURI = newUri;
         emit URI(newUri, id);
     }
@@ -119,27 +196,44 @@ contract SocietyProtocolBadges is ERC1155, AccessControl, ERC1155Supply {
         address to,
         uint256[] memory ids,
         uint256[] memory values
-    ) internal override(ERC1155, ERC1155Supply) {
+    ) internal override(ERC1155Upgradeable, ERC1155SupplyUpgradeable) {
         for (uint256 i = 0; i < ids.length; i++) {
             uint256 id = ids[i];
-            address strategy = badges[id].strategy;
-            if (strategy != address(0)) {
+            address hook = badgeHooks[id];
+
+            if (hook != address(0)) {
+                // Hook has priority
                 if (from == address(0)) {
-                     // Minting checked in mint function, but double check here if needed or rely on hook
+                    if (!ISocietyBadgeHook(hook).onCheckMint(msg.sender, to, id, values[i])) revert MintDeniedByHook();
                 } else if (to == address(0)) {
-                    require(ITransferabilityStrategy(strategy).canBurn(msg.sender, from, id, values[i]), "Burning not allowed by strategy");
+                    if (!ISocietyBadgeHook(hook).onCheckBurn(msg.sender, from, id, values[i])) revert BurnDeniedByHook();
                 } else {
-                    require(ITransferabilityStrategy(strategy).canTransfer(msg.sender, from, to, id, values[i]), "Transfer not allowed by strategy");
+                    if (!ISocietyBadgeHook(hook).onCheckTransfer(msg.sender, from, to, id, values[i])) revert TransferDeniedByHook();
+                }
+            } else {
+                // Fallback to internal mappings
+                if (from == address(0)) {
+                    if (!canMint[id][msg.sender]) revert MintNotAuthorized();
+                } else if (to == address(0)) {
+                    if (!canBurn[id][msg.sender]) revert BurnNotAuthorized();
+                } else {
+                    if (!canTransfer[id][msg.sender]) revert TransferNotAuthorized();
                 }
             }
         }
         super._update(from, to, ids, values);
     }
 
+    function _authorizeUpgrade(address newImplementation)
+        internal
+        override
+        onlyRole(GOVERNOR_ROLE)
+    {}
+
     function supportsInterface(bytes4 interfaceId)
         public
         view
-        override(ERC1155, AccessControl)
+        override(ERC1155Upgradeable, AccessControlUpgradeable)
         returns (bool)
     {
         return super.supportsInterface(interfaceId);

@@ -1,15 +1,15 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.20;
+pragma solidity 0.8.28;
 
-interface ITransferabilityStrategy {
-    function canMint(
+interface ISocietyBadgeHook {
+    function onCheckMint(
         address operator,
         address to,
         uint256 id,
         uint256 amount
     ) external view returns (bool);
 
-    function canTransfer(
+    function onCheckTransfer(
         address operator,
         address from,
         address to,
@@ -17,7 +17,7 @@ interface ITransferabilityStrategy {
         uint256 amount
     ) external view returns (bool);
 
-    function canBurn(
+    function onCheckBurn(
         address operator,
         address from,
         uint256 id,
