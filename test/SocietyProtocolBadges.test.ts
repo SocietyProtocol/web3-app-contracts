@@ -18,9 +18,12 @@ describe("Society Protocol Badges (Upgradeable)", function () {
         badges = (await upgrades.deployProxy(Badges, [], { initializer: 'initialize' })) as unknown as SocietyProtocolBadges;
         await badges.waitForDeployment();
 
-        // Grant MINTER_ROLE
-        const MINTER_ROLE = await badges.MINTER_ROLE();
-        await badges.grantRole(MINTER_ROLE, minter.address);
+
+
+        // Grant OFFICIAL_BADGE_MINTER_ROLE to owner (for easier testing of official badges if needed, though owner is governor)
+        // Governor has all permissions in this implementation for official badges check?
+        // createBadge checks: isOfficial ? (OFFICIAL_MINTER or GOVERNOR) : MINTER
+        // Owner is GOVERNOR, so owner can create official.
 
         // Deploy Mock Hook
         const Hook = await ethers.getContractFactory("MockHook");
@@ -36,8 +39,10 @@ describe("Society Protocol Badges (Upgradeable)", function () {
 
     describe("Badge Creation", function () {
         it("Governor should be able to create official badges", async function () {
-            await badges.createOfficialBadge(
+            await badges.createBadge(
                 "Official Badge",
+                true,
+                false,
                 "ipfs://official",
                 [owner.address],
                 [],
@@ -47,33 +52,33 @@ describe("Society Protocol Badges (Upgradeable)", function () {
             const badge = await badges.badges(id);
             expect(badge.name).to.equal("Official Badge");
             expect(badge.isOfficial).to.be.true;
+            expect(badge.isCommunity).to.be.false;
         });
 
-        it("Minter should be able to create community badges", async function () {
-            await badges.connect(minter).createCommunityBadge(
-                "Community Badge",
-                "ipfs://community",
-                [minter.address],
+        it("Anyone should be able to create community badges", async function () {
+            await badges.connect(user1).createBadge(
+                "Public Badge",
+                false,
+                true,
+                "ipfs://public",
+                [user1.address],
                 [],
                 []
             );
             const id = 1;
             const badge = await badges.badges(id);
-            expect(badge.name).to.equal("Community Badge");
+            expect(badge.name).to.equal("Public Badge");
             expect(badge.isOfficial).to.be.false;
+            expect(badge.isCommunity).to.be.true;
         });
 
         it("Minter should NOT be able to create official badges", async function () {
             await expect(
-                badges.connect(minter).createOfficialBadge("Fail", "ipfs://fail", [], [], [])
-            ).to.be.revertedWithCustomError(badges, "AccessControlUnauthorizedAccount"); // AccessControl revert (still string or custom depending on OZ version, usually AccessControlUnauthorizedAccount)
+                badges.connect(minter).createBadge("Fail", true, false, "ipfs://fail", [], [], [])
+            ).to.be.revertedWithCustomError(badges, "AccessControlUnauthorizedAccount");
         });
 
-        it("Non-minter should NOT be able to create community badges", async function () {
-            await expect(
-                badges.connect(user1).createCommunityBadge("Fail", "ipfs://fail", [], [], [])
-            ).to.be.revertedWithCustomError(badges, "AccessControlUnauthorizedAccount"); // AccessControl
-        });
+
     });
 
     describe("Profiles", function () {
@@ -83,7 +88,7 @@ describe("Society Protocol Badges (Upgradeable)", function () {
 
             expect(await badges.balanceOf(user1.address, id)).to.equal(1);
             expect(await badges.uri(id)).to.equal("ipfs://profile");
-            expect(await badges.userProfileId(user1.address)).to.equal(id);
+            expect(await badges.profileBadgeId(user1.address)).to.equal(id);
         });
 
         it("Should NOT allow multiple profiles per user", async function () {
@@ -114,7 +119,7 @@ describe("Society Protocol Badges (Upgradeable)", function () {
     describe("Hooks", function () {
         it("Should use Hook priority over mappings", async function () {
             // Create badge with NO internal permissions
-            await badges.createOfficialBadge("Hooked Badge", "ipfs://hooked", [], [], []);
+            await badges.createBadge("Hooked Badge", true, false, "ipfs://hooked", [], [], []);
             const id = 1;
 
             // Set Hook
@@ -131,6 +136,49 @@ describe("Society Protocol Badges (Upgradeable)", function () {
             await expect(
                 badges.connect(user1).safeTransferFrom(user1.address, user2.address, id, 1, "0x")
             ).to.be.revertedWithCustomError(badges, "TransferDeniedByHook");
+        });
+    });
+
+    describe("Modifications", function () {
+        it("Creator should be able to modify badge", async function () {
+            await badges.connect(minter).createBadge("My Badge", false, true, "ipfs://orig", [], [], []);
+            const id = 1;
+
+            await badges.connect(minter).modifyBadge(id, "My Updated Badge", false, true, "ipfs://updated");
+
+            const badge = await badges.badges(id);
+            expect(badge.name).to.equal("My Updated Badge");
+            expect(badge.metadataURI).to.equal("ipfs://updated");
+        });
+
+        it("Governor should be able to modify any badge", async function () {
+            await badges.connect(minter).createBadge("My Badge", false, true, "ipfs://orig", [], [], []);
+            const id = 1;
+
+            await badges.modifyBadge(id, "Gov Edit", true, false, "ipfs://gov");
+
+            const badge = await badges.badges(id);
+            expect(badge.name).to.equal("Gov Edit");
+            expect(badge.isOfficial).to.be.true; // Gov can change official status
+        });
+
+        it("Creator should NOT be able to change isOfficial status", async function () {
+            await badges.connect(minter).createBadge("My Badge", false, true, "ipfs://orig", [], [], []);
+            const id = 1;
+
+            // Try to make it official
+            await expect(
+                badges.connect(minter).modifyBadge(id, "My Badge", true, true, "ipfs://orig")
+            ).to.be.revertedWithCustomError(badges, "Unauthorized");
+        });
+
+        it("Stranger should NOT be able to modify badge", async function () {
+            await badges.connect(minter).createBadge("My Badge", false, true, "ipfs://orig", [], [], []);
+            const id = 1;
+
+            await expect(
+                badges.connect(user1).modifyBadge(id, "Hacked", false, true, "ipfs://hacked")
+            ).to.be.revertedWithCustomError(badges, "Unauthorized");
         });
     });
 
