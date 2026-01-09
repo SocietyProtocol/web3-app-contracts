@@ -18,24 +18,38 @@ contract SocietyProtocolBadges is
     ERC1155SupplyUpgradeable,
     UUPSUpgradeable
 {
-    bytes32 public constant GOVERNOR_ROLE = keccak256("GOVERNOR_ROLE");
-    bytes32 public constant OFFICIAL_BADGE_MINTER_ROLE =
-        keccak256("OFFICIAL_BADGE_MINTER_ROLE");
+    bytes32 public constant OFFICIAL_BADGE_CREATOR_ROLE =
+        keccak256("OFFICIAL_BADGE_CREATOR_ROLE");
+    bytes32 public constant CONTRACT_UPGRADER_ROLE =
+        keccak256("CONTRACT_UPGRADER_ROLE");
+
+    uint256 public constant PERM_NONE = 0;
+    uint256 public constant PERM_SELF = 1;
+    uint256 public constant PERM_EVERYONE = 2;
+    uint256 public constant STARTING_BADGE_ID = 10;
 
     struct BadgeInfo {
         string name;
         bool isOfficial;
         bool isCommunity;
         string metadataURI;
-        address creator;
     }
 
     mapping(uint256 => BadgeInfo) public badges;
 
-    // badgeId => operator => allowed
-    mapping(uint256 => mapping(address => bool)) public canMint;
-    mapping(uint256 => mapping(address => bool)) public canTransfer;
-    mapping(uint256 => mapping(address => bool)) public canBurn;
+    // badgeId => permissionType => allowedBadgeIds
+    // permissionType: 0 (unused/custom?), we use specific mappings below?
+    // Wait, plan said: mapping(uint256 => uint256[]) public canMint;
+
+    // badgeId => allowedBadgeIds to mint
+    mapping(uint256 => uint256[]) public canMint;
+    // badgeId => allowedBadgeIds to transfer
+    mapping(uint256 => uint256[]) public canTransfer;
+    // badgeId => allowedBadgeIds to burn
+    mapping(uint256 => uint256[]) public canBurn;
+
+    // badgeId => editor => isAllowed
+    mapping(uint256 => mapping(address => bool)) public canEdit;
 
     // badgeId => hook address
     mapping(uint256 => address) public badgeHooks;
@@ -51,7 +65,7 @@ contract SocietyProtocolBadges is
         bool isOfficial,
         bool isCommunity,
         address indexed creator
-    );
+    ); // Keeping creator in event for indexing, even if not in struct? Or remove? User said "Creator should include itself in the managers list". I'll keep it in event for provenance.
     event BadgeModified(
         uint256 indexed id,
         string name,
@@ -59,12 +73,10 @@ contract SocietyProtocolBadges is
         bool isCommunity,
         string metadataURI
     );
-    event PermissionsUpdated(
+    event EditorsUpdated(
         uint256 indexed id,
-        address indexed operator,
-        bool mint,
-        bool transfer,
-        bool burn
+        address indexed editor,
+        bool isAllowed
     );
     event HookUpdated(uint256 indexed id, address indexed hook);
     event ProfileCreated(address indexed user, uint256 indexed id);
@@ -93,7 +105,10 @@ contract SocietyProtocolBadges is
         __UUPSUpgradeable_init();
 
         _grantRole(DEFAULT_ADMIN_ROLE, msg.sender);
-        _grantRole(GOVERNOR_ROLE, msg.sender);
+        _grantRole(CONTRACT_UPGRADER_ROLE, msg.sender);
+        _grantRole(OFFICIAL_BADGE_CREATOR_ROLE, msg.sender);
+
+        nextTokenId = STARTING_BADGE_ID;
     }
 
     /// @notice Creates a new badge
@@ -103,19 +118,17 @@ contract SocietyProtocolBadges is
         bool isOfficial,
         bool isCommunity,
         string memory metadataURI,
-        address[] calldata minters,
-        address[] calldata transferers,
-        address[] calldata burners
+        uint256[] memory minters,
+        uint256[] memory transferers,
+        uint256[] memory burners,
+        address[] memory editors
     ) external returns (uint256) {
         if (isOfficial) {
-            // Check for OFFICIAL_BADGE_MINTER_ROLE
-            if (
-                !hasRole(OFFICIAL_BADGE_MINTER_ROLE, msg.sender) &&
-                !hasRole(GOVERNOR_ROLE, msg.sender)
-            ) {
+            // Check for OFFICIAL_BADGE_CREATOR_ROLE
+            if (!hasRole(OFFICIAL_BADGE_CREATOR_ROLE, msg.sender)) {
                 revert AccessControlUnauthorizedAccount(
                     msg.sender,
-                    OFFICIAL_BADGE_MINTER_ROLE
+                    OFFICIAL_BADGE_CREATOR_ROLE
                 );
             }
         }
@@ -128,7 +141,8 @@ contract SocietyProtocolBadges is
                 metadataURI,
                 minters,
                 transferers,
-                burners
+                burners,
+                editors
             );
     }
 
@@ -139,27 +153,50 @@ contract SocietyProtocolBadges is
     ) external returns (uint256) {
         if (profileBadgeId[msg.sender] != 0) revert ProfileAlreadyExists();
 
-        address[] memory empty = new address[](0);
+        uint256[] memory empty = new uint256[](0);
+        address[] memory editors = new address[](1);
+        editors[0] = msg.sender;
 
         // Create the badge type
-        uint256 id = _createBadge(
+        uint256 pid = _createBadge(
             "Profile",
             false,
             false,
             metadataURI,
             empty,
             empty,
-            empty
+            empty,
+            editors
         );
 
-        // Grant temporary mint permission to msg.sender so _update check passes
-        canMint[id][msg.sender] = true;
-        _mint(msg.sender, id, 1, "");
-        canMint[id][msg.sender] = false; // Revoke immediately
+        // Grant temporary mint perm via ad-hoc way?
+        // Or just use `_mint` and ensure `_update` allows it?
+        // `_update` checks `canMint`.
+        // If I add PERM_SELF to `canMint[pid]`, then anyone can mint to themselves? Yes.
+        // That's bad for Profile if we want uniqueness.
 
-        profileBadgeId[msg.sender] = id;
-        emit ProfileCreated(msg.sender, id);
-        return id;
+        // Solution: `_update` should exclude `msg.sender == address(this)`? No.
+        // Maybe `_update` logic can skip check if `from == 0` and `to` is `msg.sender` AND we are in `createProfile`? No.
+
+        // How about we just add a specific permission for the user temporarily?
+        // But permissions are badge IDs now.
+        // We don't have address-based permissions for minting anymore (except editors for editing).
+        // "Permissions about transferability ... assigned by holding other badgeID."
+
+        // Special case: Profile creation.
+        // Maybe we just don't check permissions if `minter` has `OFFICIAL_BADGE_CREATOR_ROLE` or `GOVERNOR` (removed)?
+        // Or maybe `_update` check is skipped for Internal mints?
+        // ERC1155 `_mint` calls `_update`.
+
+        // I will add a `bool skippingChecks` state var? Ugly.
+        // I will append `PERM_SELF` to `canMint`, mint, then pop.
+        canMint[pid].push(PERM_SELF);
+        _mint(msg.sender, pid, 1, "");
+        canMint[pid].pop();
+
+        profileBadgeId[msg.sender] = pid;
+        emit ProfileCreated(msg.sender, pid);
+        return pid;
     }
 
     function _createBadge(
@@ -167,9 +204,10 @@ contract SocietyProtocolBadges is
         bool isOfficial,
         bool isCommunity,
         string memory metadataURI,
-        address[] memory minters,
-        address[] memory transferers,
-        address[] memory burners
+        uint256[] memory minters,
+        uint256[] memory transferers,
+        uint256[] memory burners,
+        address[] memory editors
     ) internal returns (uint256) {
         nextTokenId++;
         uint256 id = nextTokenId;
@@ -178,21 +216,17 @@ contract SocietyProtocolBadges is
             name: name,
             isOfficial: isOfficial,
             isCommunity: isCommunity,
-            metadataURI: metadataURI,
-            creator: msg.sender
+            metadataURI: metadataURI
         });
 
-        for (uint256 i = 0; i < minters.length; i++) {
-            canMint[id][minters[i]] = true;
-            emit PermissionsUpdated(id, minters[i], true, false, false);
-        }
-        for (uint256 i = 0; i < transferers.length; i++) {
-            canTransfer[id][transferers[i]] = true;
-            emit PermissionsUpdated(id, transferers[i], false, true, false);
-        }
-        for (uint256 i = 0; i < burners.length; i++) {
-            canBurn[id][burners[i]] = true;
-            emit PermissionsUpdated(id, burners[i], false, false, true);
+        canMint[id] = minters;
+        canTransfer[id] = transferers;
+        canBurn[id] = burners;
+
+        // Setup editors
+        for (uint256 i = 0; i < editors.length; i++) {
+            canEdit[id][editors[i]] = true;
+            emit EditorsUpdated(id, editors[i], true);
         }
 
         emit BadgeCreated(id, name, isOfficial, isCommunity, msg.sender);
@@ -201,10 +235,8 @@ contract SocietyProtocolBadges is
 
     /// @notice Sets a hook contract for a specific badge
     /// @dev Only callable by GOVERNOR_ROLE
-    function setBadgeHook(
-        uint256 id,
-        address hook
-    ) external onlyRole(GOVERNOR_ROLE) {
+    function setBadgeHook(uint256 id, address hook) external {
+        if (!canEdit[id][msg.sender]) revert Unauthorized();
         badgeHooks[id] = hook;
         emit HookUpdated(id, hook);
     }
@@ -220,18 +252,10 @@ contract SocietyProtocolBadges is
     ) external {
         if (id > nextTokenId) revert BadgeDoesNotExist();
 
+        // Check edit permission
+        if (!canEdit[id][msg.sender]) revert Unauthorized();
+
         BadgeInfo storage badge = badges[id];
-
-        bool isGovernor = hasRole(GOVERNOR_ROLE, msg.sender);
-        bool isCreator = (badge.creator == msg.sender);
-
-        if (!isGovernor && !isCreator) revert Unauthorized();
-
-        // Only Governor can toggle isOfficial
-        if (badge.isOfficial != isOfficial) {
-            if (!isGovernor) revert Unauthorized();
-        }
-
         badge.name = name;
         badge.isOfficial = isOfficial;
         badge.isCommunity = isCommunity;
@@ -253,11 +277,9 @@ contract SocietyProtocolBadges is
     }
 
     /// @notice Updates the metadata URI for a badge
-    /// @dev Only callable by GOVERNOR_ROLE
-    function setURI(
-        uint256 id,
-        string memory newUri
-    ) external onlyRole(GOVERNOR_ROLE) {
+    /// @dev Only callable by editors
+    function setURI(uint256 id, string memory newUri) external {
+        if (!canEdit[id][msg.sender]) revert Unauthorized();
         badges[id].metadataURI = newUri;
         emit URI(newUri, id);
     }
@@ -319,14 +341,54 @@ contract SocietyProtocolBadges is
                     ) revert TransferDeniedByHook();
                 }
             } else {
-                // Fallback to internal mappings
+                // Fallback to badge-based permission logic
+                uint256[] storage rules;
                 if (from == address(0)) {
-                    if (!canMint[id][msg.sender]) revert MintNotAuthorized();
+                    rules = canMint[id];
                 } else if (to == address(0)) {
-                    if (!canBurn[id][msg.sender]) revert BurnNotAuthorized();
+                    rules = canBurn[id];
                 } else {
-                    if (!canTransfer[id][msg.sender])
-                        revert TransferNotAuthorized();
+                    rules = canTransfer[id];
+                }
+
+                bool allowed = false;
+                for (uint256 j = 0; j < rules.length; j++) {
+                    uint256 rule = rules[j];
+
+                    if (rule == PERM_EVERYONE) {
+                        allowed = true;
+                        break;
+                    }
+                    if (rule == PERM_SELF) {
+                        // "1 means self operations allowed"
+                        // Mint: msg.sender == to? Usually minting to self.
+                        // Burn: msg.sender == from?
+                        // Transfer: msg.sender == from? (Sender moving their own tokens)
+                        if (from == address(0)) {
+                            if (to == msg.sender) {
+                                allowed = true;
+                                break;
+                            }
+                        } else {
+                            if (from == msg.sender) {
+                                allowed = true;
+                                break;
+                            }
+                        }
+                    }
+                    // If rule > STARTING_BADGE_ID (or just regular ID), check ownership
+                    if (rule >= STARTING_BADGE_ID) {
+                        if (balanceOf(msg.sender, rule) > 0) {
+                            allowed = true;
+                            break;
+                        }
+                    }
+                }
+
+                if (!allowed) {
+                    if (from == address(0)) revert MintNotAuthorized();
+                    else if (to == address(0)) revert BurnNotAuthorized();
+                    else revert TransferNotAuthorized();
                 }
             }
         }
@@ -335,7 +397,7 @@ contract SocietyProtocolBadges is
 
     function _authorizeUpgrade(
         address newImplementation
-    ) internal override onlyRole(GOVERNOR_ROLE) {}
+    ) internal override onlyRole(CONTRACT_UPGRADER_ROLE) {}
 
     function supportsInterface(
         bytes4 interfaceId
