@@ -37,10 +37,6 @@ contract SocietyProtocolBadges is
 
     mapping(uint256 => BadgeInfo) public badges;
 
-    // badgeId => permissionType => allowedBadgeIds
-    // permissionType: 0 (unused/custom?), we use specific mappings below?
-    // Wait, plan said: mapping(uint256 => uint256[]) public canMint;
-
     // badgeId => allowedBadgeIds to mint
     mapping(uint256 => uint256[]) public canMint;
     // badgeId => allowedBadgeIds to transfer
@@ -65,7 +61,7 @@ contract SocietyProtocolBadges is
         bool isOfficial,
         bool isCommunity,
         address indexed creator
-    ); // Keeping creator in event for indexing, even if not in struct? Or remove? User said "Creator should include itself in the managers list". I'll keep it in event for provenance.
+    );
     event BadgeModified(
         uint256 indexed id,
         string name,
@@ -132,7 +128,7 @@ contract SocietyProtocolBadges is
                 );
             }
         }
-        // No restriction for community badges - anyone can create
+        // Anyone can create a badge
         return
             _createBadge(
                 name,
@@ -169,27 +165,6 @@ contract SocietyProtocolBadges is
             editors
         );
 
-        // Grant temporary mint perm via ad-hoc way?
-        // Or just use `_mint` and ensure `_update` allows it?
-        // `_update` checks `canMint`.
-        // If I add PERM_SELF to `canMint[pid]`, then anyone can mint to themselves? Yes.
-        // That's bad for Profile if we want uniqueness.
-
-        // Solution: `_update` should exclude `msg.sender == address(this)`? No.
-        // Maybe `_update` logic can skip check if `from == 0` and `to` is `msg.sender` AND we are in `createProfile`? No.
-
-        // How about we just add a specific permission for the user temporarily?
-        // But permissions are badge IDs now.
-        // We don't have address-based permissions for minting anymore (except editors for editing).
-        // "Permissions about transferability ... assigned by holding other badgeID."
-
-        // Special case: Profile creation.
-        // Maybe we just don't check permissions if `minter` has `OFFICIAL_BADGE_CREATOR_ROLE` or `GOVERNOR` (removed)?
-        // Or maybe `_update` check is skipped for Internal mints?
-        // ERC1155 `_mint` calls `_update`.
-
-        // I will add a `bool skippingChecks` state var? Ugly.
-        // I will append `PERM_SELF` to `canMint`, mint, then pop.
         canMint[pid].push(PERM_SELF);
         _mint(msg.sender, pid, 1, "");
         canMint[pid].pop();
@@ -360,10 +335,6 @@ contract SocietyProtocolBadges is
                         break;
                     }
                     if (rule == PERM_SELF) {
-                        // "1 means self operations allowed"
-                        // Mint: msg.sender == to? Usually minting to self.
-                        // Burn: msg.sender == from?
-                        // Transfer: msg.sender == from? (Sender moving their own tokens)
                         if (from == address(0)) {
                             if (to == msg.sender) {
                                 allowed = true;
@@ -376,7 +347,6 @@ contract SocietyProtocolBadges is
                             }
                         }
                     }
-                    // If rule > STARTING_BADGE_ID (or just regular ID), check ownership
                     if (rule >= STARTING_BADGE_ID) {
                         if (balanceOf(msg.sender, rule) > 0) {
                             allowed = true;

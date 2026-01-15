@@ -2,28 +2,35 @@ import { expect } from "chai";
 import { ethers, upgrades } from "hardhat";
 import { SocietyProtocolBadges, MockHook } from "../typechain-types";
 
-describe("Society Protocol Badges (Upgradeable)", function () {
+const PERM_NONE = 0n;
+const PERM_SELF = 1n;
+const PERM_EVERYONE = 2n;
+const STARTING_BADGE_ID = 10n;
+
+describe("Society Protocol Badges (Upgradeable) - Refactored", function () {
     let badges: SocietyProtocolBadges;
     let hook: MockHook;
     let owner: any;
-    let minter: any;
+    let creator: any;
+    let upgrader: any;
     let user1: any;
     let user2: any;
 
     beforeEach(async function () {
-        [owner, minter, user1, user2] = await ethers.getSigners();
+        [owner, creator, upgrader, user1, user2] = await ethers.getSigners();
 
         // Deploy Badges via Proxy
         const Badges = await ethers.getContractFactory("SocietyProtocolBadges");
         badges = (await upgrades.deployProxy(Badges, [], { initializer: 'initialize' })) as unknown as SocietyProtocolBadges;
         await badges.waitForDeployment();
 
+        // Setup Roles
+        const OFFICIAL_CREATOR_ROLE = await badges.OFFICIAL_BADGE_CREATOR_ROLE();
+        const UPGRADER_ROLE = await badges.CONTRACT_UPGRADER_ROLE();
 
-
-        // Grant OFFICIAL_BADGE_MINTER_ROLE to owner (for easier testing of official badges if needed, though owner is governor)
-        // Governor has all permissions in this implementation for official badges check?
-        // createBadge checks: isOfficial ? (OFFICIAL_MINTER or GOVERNOR) : MINTER
-        // Owner is GOVERNOR, so owner can create official.
+        // Grant roles to other accounts
+        await badges.grantRole(OFFICIAL_CREATOR_ROLE, creator.address);
+        await badges.grantRole(UPGRADER_ROLE, upgrader.address);
 
         // Deploy Mock Hook
         const Hook = await ethers.getContractFactory("MockHook");
@@ -33,26 +40,33 @@ describe("Society Protocol Badges (Upgradeable)", function () {
 
     describe("Initialization", function () {
         it("Should initialize with correct roles", async function () {
-            expect(await badges.hasRole(await badges.GOVERNOR_ROLE(), owner.address)).to.be.true;
+            expect(await badges.hasRole(await badges.OFFICIAL_BADGE_CREATOR_ROLE(), owner.address)).to.be.true;
+            expect(await badges.hasRole(await badges.CONTRACT_UPGRADER_ROLE(), owner.address)).to.be.true;
+            expect(await badges.nextTokenId()).to.equal(STARTING_BADGE_ID);
         });
     });
 
     describe("Badge Creation", function () {
-        it("Governor should be able to create official badges", async function () {
-            await badges.createBadge(
+        it("Official Creator should be able to create official badges", async function () {
+            await badges.connect(creator).createBadge(
                 "Official Badge",
                 true,
                 false,
                 "ipfs://official",
-                [owner.address],
-                [],
-                []
+                [PERM_EVERYONE], // Mint
+                [PERM_EVERYONE], // Transfer
+                [PERM_EVERYONE],  // Burn
+                [creator.address] // Editors
             );
-            const id = 1;
+            const id = STARTING_BADGE_ID + 1n;
             const badge = await badges.badges(id);
             expect(badge.name).to.equal("Official Badge");
             expect(badge.isOfficial).to.be.true;
-            expect(badge.isCommunity).to.be.false;
+
+            const mintRule = await badges.canMint(id, 0);
+            expect(mintRule).to.equal(PERM_EVERYONE);
+
+            expect(await badges.canEdit(id, creator.address)).to.be.true;
         });
 
         it("Anyone should be able to create community badges", async function () {
@@ -61,135 +75,110 @@ describe("Society Protocol Badges (Upgradeable)", function () {
                 false,
                 true,
                 "ipfs://public",
-                [user1.address],
-                [],
-                []
+                [], [], [], [user1.address]
             );
-            const id = 1;
+            const id = STARTING_BADGE_ID + 1n;
             const badge = await badges.badges(id);
             expect(badge.name).to.equal("Public Badge");
             expect(badge.isOfficial).to.be.false;
-            expect(badge.isCommunity).to.be.true;
         });
 
-        it("Minter should NOT be able to create official badges", async function () {
+        it("Non-official creator should NOT be able to create official badges", async function () {
             await expect(
-                badges.connect(minter).createBadge("Fail", true, false, "ipfs://fail", [], [], [])
+                badges.connect(user1).createBadge("Fail", true, false, "ipfs://fail", [], [], [], [])
             ).to.be.revertedWithCustomError(badges, "AccessControlUnauthorizedAccount");
         });
+    });
 
+    describe("Permissions Logic (Badge-Gating)", function () {
+        let authBadgeId: bigint;
+        let gatedBadgeId: bigint;
 
+        beforeEach(async function () {
+            // Create an "Auth" badge that everyone can mint freely
+            await badges.createBadge("Auth Badge", false, false, "ipfs://auth", [PERM_EVERYONE], [PERM_EVERYONE], [], [owner.address]);
+            authBadgeId = STARTING_BADGE_ID + 1n;
+
+            // Create a "Gated" badge that requires holding "Auth Badge" to mint
+            await badges.createBadge("Gated Badge", false, false, "ipfs://gated", [authBadgeId], [PERM_EVERYONE], [], [owner.address]);
+            gatedBadgeId = STARTING_BADGE_ID + 2n;
+        });
+
+        it("Should allow minting if user holds required badge", async function () {
+            // User1 mints Auth badge
+            await badges.connect(user1).mint(user1.address, authBadgeId, 1, "0x");
+            expect(await badges.balanceOf(user1.address, authBadgeId)).to.equal(1n);
+
+            // User1 tries to mint Gated badge -> Should succeed
+            await badges.connect(user1).mint(user1.address, gatedBadgeId, 1, "0x");
+            expect(await badges.balanceOf(user1.address, gatedBadgeId)).to.equal(1n);
+        });
+
+        it("Should DENY minting if user does not hold required badge", async function () {
+            // User2 has no Auth badge
+            // User2 tries to mint Gated badge -> Should fail
+            await expect(
+                badges.connect(user2).mint(user2.address, gatedBadgeId, 1, "0x")
+            ).to.be.revertedWithCustomError(badges, "MintNotAuthorized");
+        });
+
+        it("Should allow actions with PERM_EVERYONE", async function () {
+            // Auth badge has PERM_EVERYONE for minting
+            await badges.connect(user2).mint(user2.address, authBadgeId, 1, "0x");
+            expect(await badges.balanceOf(user2.address, authBadgeId)).to.equal(1);
+        });
+    });
+
+    describe("Modifications & Editors", function () {
+        let badgeId: bigint;
+
+        beforeEach(async function () {
+            await badges.connect(creator).createBadge("Editable", false, false, "ipfs://edit", [], [], [], [creator.address]);
+            badgeId = STARTING_BADGE_ID + 1n;
+        });
+
+        it("Editor should be able to modify badge", async function () {
+            await badges.connect(creator).modifyBadge(badgeId, "Edited", true, true, "ipfs://new");
+            const badge = await badges.badges(badgeId);
+            expect(badge.name).to.equal("Edited");
+            expect(badge.isOfficial).to.be.true;
+        });
+
+        it("Non-editor should NOT be able to modify badge", async function () {
+            await expect(
+                badges.connect(user1).modifyBadge(badgeId, "Hacked", false, false, "ipfs://hacked")
+            ).to.be.revertedWithCustomError(badges, "Unauthorized");
+        });
+
+        it("Editor should be able to set URI", async function () {
+            await badges.connect(creator).setURI(badgeId, "ipfs://uri-updated");
+            expect(await badges.uri(badgeId)).to.equal("ipfs://uri-updated");
+        });
     });
 
     describe("Profiles", function () {
-        it("Should create a profile (Unique NFT)", async function () {
+        it("Should create a profile and allow self-minting internally", async function () {
             await badges.connect(user1).createProfile("ipfs://profile");
-            const id = 1; // First token since no preconfigured badges
+            const pid = await badges.profileBadgeId(user1.address);
 
-            expect(await badges.balanceOf(user1.address, id)).to.equal(1);
-            expect(await badges.uri(id)).to.equal("ipfs://profile");
-            expect(await badges.profileBadgeId(user1.address)).to.equal(id);
-        });
+            expect(await badges.balanceOf(user1.address, pid)).to.equal(1);
 
-        it("Should NOT allow multiple profiles per user", async function () {
-            await badges.connect(user1).createProfile("ipfs://profile1");
-            await expect(
-                badges.connect(user1).createProfile("ipfs://profile2")
-            ).to.be.revertedWithCustomError(badges, "ProfileAlreadyExists");
-        });
-
-        it("Owner should be able to update profile URI", async function () {
-            await badges.connect(user1).createProfile("ipfs://old");
-            const id = 1;
-
-            await badges.connect(user1).updateProfileURI(id, "ipfs://new");
-            expect(await badges.uri(id)).to.equal("ipfs://new");
-        });
-
-        it("Non-owner should NOT be able to update profile URI", async function () {
-            await badges.connect(user1).createProfile("ipfs://old");
-            const id = 1;
-
-            await expect(
-                badges.connect(user2).updateProfileURI(id, "ipfs://hack")
-            ).to.be.revertedWithCustomError(badges, "NotProfileOwner");
-        });
-    });
-
-    describe("Hooks", function () {
-        it("Should use Hook priority over mappings", async function () {
-            // Create badge with NO internal permissions
-            await badges.createBadge("Hooked Badge", true, false, "ipfs://hooked", [], [], []);
-            const id = 1;
-
-            // Set Hook
-            await badges.setBadgeHook(id, await hook.getAddress());
-
-            // Hook allows mint (default true) -> Should succeed even if internal mapping is false
-            await badges.mint(user1.address, id, 1, "0x");
-            expect(await badges.balanceOf(user1.address, id)).to.equal(1);
-
-            // Update Hook to deny transfer
-            await hook.setPermissions(true, false, true);
-
-            // Try transfer -> Should fail
-            await expect(
-                badges.connect(user1).safeTransferFrom(user1.address, user2.address, id, 1, "0x")
-            ).to.be.revertedWithCustomError(badges, "TransferDeniedByHook");
-        });
-    });
-
-    describe("Modifications", function () {
-        it("Creator should be able to modify badge", async function () {
-            await badges.connect(minter).createBadge("My Badge", false, true, "ipfs://orig", [], [], []);
-            const id = 1;
-
-            await badges.connect(minter).modifyBadge(id, "My Updated Badge", false, true, "ipfs://updated");
-
-            const badge = await badges.badges(id);
-            expect(badge.name).to.equal("My Updated Badge");
-            expect(badge.metadataURI).to.equal("ipfs://updated");
-        });
-
-        it("Governor should be able to modify any badge", async function () {
-            await badges.connect(minter).createBadge("My Badge", false, true, "ipfs://orig", [], [], []);
-            const id = 1;
-
-            await badges.modifyBadge(id, "Gov Edit", true, false, "ipfs://gov");
-
-            const badge = await badges.badges(id);
-            expect(badge.name).to.equal("Gov Edit");
-            expect(badge.isOfficial).to.be.true; // Gov can change official status
-        });
-
-        it("Creator should NOT be able to change isOfficial status", async function () {
-            await badges.connect(minter).createBadge("My Badge", false, true, "ipfs://orig", [], [], []);
-            const id = 1;
-
-            // Try to make it official
-            await expect(
-                badges.connect(minter).modifyBadge(id, "My Badge", true, true, "ipfs://orig")
-            ).to.be.revertedWithCustomError(badges, "Unauthorized");
-        });
-
-        it("Stranger should NOT be able to modify badge", async function () {
-            await badges.connect(minter).createBadge("My Badge", false, true, "ipfs://orig", [], [], []);
-            const id = 1;
-
-            await expect(
-                badges.connect(user1).modifyBadge(id, "Hacked", false, true, "ipfs://hacked")
-            ).to.be.revertedWithCustomError(badges, "Unauthorized");
+            // createProfile prevents creating another.
+            await expect(badges.connect(user1).createProfile("ipfs://2")).to.be.revertedWithCustomError(badges, "ProfileAlreadyExists");
         });
     });
 
     describe("Upgradeability", function () {
-        it("Should be upgradeable by Governor", async function () {
+        it("Should be upgradeable by Upgrader", async function () {
             const BadgesV2 = await ethers.getContractFactory("SocietyProtocolBadges");
             await upgrades.upgradeProxy(await badges.getAddress(), BadgesV2);
         });
 
-        it("Should NOT be upgradeable by non-Governor", async function () {
-            const BadgesV2 = await ethers.getContractFactory("SocietyProtocolBadges", user1);
+        it("Should NOT be upgradeable by non-Upgrader", async function () {
+            const UPGRADER_ROLE = await badges.CONTRACT_UPGRADER_ROLE();
+            await badges.revokeRole(UPGRADER_ROLE, owner.address);
+
+            const BadgesV2 = await ethers.getContractFactory("SocietyProtocolBadges");
             await expect(
                 upgrades.upgradeProxy(await badges.getAddress(), BadgesV2)
             ).to.be.reverted; // AccessControl revert

@@ -13,7 +13,7 @@ async function main() {
     const SocietyProtocolBadges = await ethers.getContractAt("SocietyProtocolBadges", BADGES_CONTRACT_ADDRESS);
 
     // 1. Create 3 Official Badges
-    // Only GOVERNOR_ROLE can create official badges. Deployer has it.
+    // Only OFFICIAL_BADGE_CREATOR_ROLE can create official badges. Deployer has it.
 
     const officialBadges = [
         { name: "Society Member", uri: "ipfs://member" },
@@ -24,12 +24,15 @@ async function main() {
     console.log("\nCreating Official Badges...");
     for (const badge of officialBadges) {
         try {
-            const tx = await SocietyProtocolBadges.createOfficialBadge(
+            const tx = await SocietyProtocolBadges.createBadge(
                 badge.name,
+                true, // isOfficial
+                false, // isCommunity
                 badge.uri,
                 [], // minters
                 [], // transferers
-                []  // burners
+                [],  // burners
+                [deployer.address] // editors - assigning deployer as editor for now
             );
             await tx.wait();
             console.log(`- Created Official Badge: ${badge.name}`);
@@ -53,27 +56,21 @@ async function main() {
     }
 
     // 3. Create 1 Community Badge
-    // Only MINTER_ROLE can create community badges.
-
-    const MINTER_ROLE = await SocietyProtocolBadges.MINTER_ROLE();
-
-    if (!(await SocietyProtocolBadges.hasRole(MINTER_ROLE, deployer.address))) {
-        console.log("\nGranting MINTER_ROLE to deployer...");
-        const grantTx = await SocietyProtocolBadges.grantRole(MINTER_ROLE, deployer.address);
-        await grantTx.wait();
-        console.log("- MINTER_ROLE granted");
-    } else {
-        console.log("\nDeployer already has MINTER_ROLE");
-    }
+    // Only MINTER_ROLE (now implicitly handled or anyone can create if logic allows, but usually we want specific roles for official)
+    // Actually per contract: "Anyone can create a badge" (lines 131-133 of SocietyProtocolBadges.sol)
+    // But let's keep the flow.
 
     console.log("\nCreating Community Badge...");
     try {
-        const communityTx = await SocietyProtocolBadges.createCommunityBadge(
+        const communityTx = await SocietyProtocolBadges.createBadge(
             "Early Adopter",
+            false, // isOfficial
+            true,  // isCommunity
             "ipfs://early-adopter",
             [], // minters
             [], // transferers
-            []  // burners
+            [],  // burners
+            [deployer.address] // editors
         );
         await communityTx.wait();
         console.log("- Created Community Badge: Early Adopter");
