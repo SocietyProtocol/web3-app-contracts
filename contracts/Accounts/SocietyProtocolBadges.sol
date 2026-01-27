@@ -55,6 +55,9 @@ contract SocietyProtocolBadges is
 
     uint256 public nextTokenId;
 
+    // badgeId => list of editors (for enumeration)
+    mapping(uint256 => address[]) private _badgeEditors;
+
     event BadgeCreated(
         uint256 indexed id,
         string name,
@@ -73,6 +76,13 @@ contract SocietyProtocolBadges is
         uint256 indexed id,
         address indexed editor,
         bool isAllowed
+    );
+    event BadgePermissions(
+        uint256 indexed id,
+        uint256[] minters,
+        uint256[] transferers,
+        uint256[] burners,
+        address[] editors
     );
     event HookUpdated(uint256 indexed id, address indexed hook);
     event ProfileCreated(address indexed user, uint256 indexed id);
@@ -201,10 +211,12 @@ contract SocietyProtocolBadges is
         // Setup editors
         for (uint256 i = 0; i < editors.length; i++) {
             canEdit[id][editors[i]] = true;
+            _badgeEditors[id].push(editors[i]);
             emit EditorsUpdated(id, editors[i], true);
         }
 
         emit BadgeCreated(id, name, isOfficial, isCommunity, msg.sender);
+        emit BadgePermissions(id, minters, transferers, burners, editors);
         return id;
     }
 
@@ -272,6 +284,34 @@ contract SocietyProtocolBadges is
 
     function uri(uint256 id) public view override returns (string memory) {
         return badges[id].metadataURI;
+    }
+
+    /// @notice Returns the list of badges required to mint the given badgeId
+    function getBadgeMinters(
+        uint256 id
+    ) external view returns (uint256[] memory) {
+        return canMint[id];
+    }
+
+    /// @notice Returns the list of badges required to transfer the given badgeId
+    function getBadgeTransferers(
+        uint256 id
+    ) external view returns (uint256[] memory) {
+        return canTransfer[id];
+    }
+
+    /// @notice Returns the list of badges required to burn the given badgeId
+    function getBadgeBurners(
+        uint256 id
+    ) external view returns (uint256[] memory) {
+        return canBurn[id];
+    }
+
+    /// @notice Returns the list of addresses authorized to edit the given badgeId
+    function getBadgeEditors(
+        uint256 id
+    ) external view returns (address[] memory) {
+        return _badgeEditors[id];
     }
 
     function _update(
