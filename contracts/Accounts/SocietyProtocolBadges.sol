@@ -30,6 +30,7 @@ contract SocietyProtocolBadges is
 
     struct BadgeInfo {
         string name;
+        address hook;
         bool isOfficial;
         bool isCommunity;
         string metadataURI;
@@ -47,16 +48,13 @@ contract SocietyProtocolBadges is
     // badgeId => editor => isAllowed
     mapping(uint256 => mapping(address => bool)) public canEdit;
 
-    // badgeId => hook address
-    mapping(uint256 => address) public badgeHooks;
-
     // user => profileBadgeId
     mapping(address => uint256) public profileBadgeId;
 
-    uint256 public nextTokenId;
-
     // badgeId => list of editors (for enumeration)
     mapping(uint256 => address[]) private _badgeEditors;
+
+    uint256 public nextTokenId;
 
     event BadgeCreated(
         uint256 indexed id,
@@ -199,6 +197,7 @@ contract SocietyProtocolBadges is
 
         badges[id] = BadgeInfo({
             name: name,
+            hook: address(0),
             isOfficial: isOfficial,
             isCommunity: isCommunity,
             metadataURI: metadataURI
@@ -224,7 +223,7 @@ contract SocietyProtocolBadges is
     /// @dev Only callable by GOVERNOR_ROLE
     function setBadgeHook(uint256 id, address hook) external {
         if (!canEdit[id][msg.sender]) revert Unauthorized();
-        badgeHooks[id] = hook;
+        badges[id].hook = hook;
         emit HookUpdated(id, hook);
     }
 
@@ -243,6 +242,18 @@ contract SocietyProtocolBadges is
         if (!canEdit[id][msg.sender]) revert Unauthorized();
 
         BadgeInfo storage badge = badges[id];
+
+        // Check for official badge status toggling
+        // Only OFFICIAL_BADGE_CREATOR_ROLE can change isOfficial status (promotion or demotion)
+        if (isOfficial != badge.isOfficial) {
+            if (!hasRole(OFFICIAL_BADGE_CREATOR_ROLE, msg.sender)) {
+                revert AccessControlUnauthorizedAccount(
+                    msg.sender,
+                    OFFICIAL_BADGE_CREATOR_ROLE
+                );
+            }
+        }
+
         badge.name = name;
         badge.isOfficial = isOfficial;
         badge.isCommunity = isCommunity;
@@ -322,7 +333,7 @@ contract SocietyProtocolBadges is
     ) internal override(ERC1155Upgradeable, ERC1155SupplyUpgradeable) {
         for (uint256 i = 0; i < ids.length; i++) {
             uint256 id = ids[i];
-            address hook = badgeHooks[id];
+            address hook = badges[id].hook;
 
             if (hook != address(0)) {
                 // Hook has priority

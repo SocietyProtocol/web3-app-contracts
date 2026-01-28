@@ -156,6 +156,115 @@ describe("Society Protocol Badges (Upgradeable) - Refactored", function () {
         });
     });
 
+    describe("Getters & Events", function () {
+        it("Should emit BadgePermissions event on badge creation", async function () {
+            const id = STARTING_BADGE_ID + 1n;
+            const minters = [PERM_EVERYONE];
+            const transferers = [STARTING_BADGE_ID];
+            const burners = [] as bigint[];
+            const editors = [creator.address, user1.address];
+
+            const tx = await badges.connect(creator).createBadge(
+                "Test Badge",
+                true,
+                false,
+                "ipfs://test",
+                minters,
+                transferers,
+                burners,
+                editors
+            );
+
+            const receipt = await tx.wait();
+            const event = receipt?.logs.find(
+                (log) => {
+                    try {
+                        return badges.interface.parseLog(log)?.name === "BadgePermissions"
+                    } catch (e) {
+                        return false;
+                    }
+                }
+            );
+
+            expect(event).to.not.be.undefined;
+            const parsedLog = badges.interface.parseLog(event!);
+            expect(parsedLog?.args.id).to.equal(id);
+            expect(parsedLog?.args.minters).to.deep.equal(minters);
+            expect(parsedLog?.args.transferers).to.deep.equal(transferers);
+            expect(parsedLog?.args.burners).to.deep.equal(burners);
+            expect(parsedLog?.args.editors).to.deep.equal(editors);
+        });
+
+        it("Should return correct permissions via getters", async function () {
+            const minters = [PERM_EVERYONE, STARTING_BADGE_ID];
+            const transferers = [STARTING_BADGE_ID];
+            const burners = [PERM_EVERYONE];
+            const editors = [owner.address, creator.address];
+
+            await badges.connect(creator).createBadge(
+                "Getter Test",
+                true,
+                false,
+                "ipfs://getter",
+                minters,
+                transferers,
+                burners,
+                editors
+            );
+
+            const id = STARTING_BADGE_ID + 1n;
+
+            const storedMinters = await badges.getBadgeMinters(id);
+            const storedTransferers = await badges.getBadgeTransferers(id);
+            const storedBurners = await badges.getBadgeBurners(id);
+            const storedEditors = await badges.getBadgeEditors(id);
+
+            expect(storedMinters).to.deep.equal(minters);
+            expect(storedTransferers).to.deep.equal(transferers);
+            expect(storedBurners).to.deep.equal(burners);
+            expect(storedEditors).to.deep.equal(editors);
+        });
+    });
+
+    describe("Security & Official Status", function () {
+        it("Should only allow OFFICIAL_BADGE_CREATOR_ROLE to promote a badge to official", async function () {
+            await badges.createBadge("Community", false, true, "ipfs://1", [], [], [], [user1.address]);
+            const id = STARTING_BADGE_ID + 1n;
+
+            await expect(
+                badges.connect(user1).modifyBadge(id, "Community", true, true, "ipfs://1")
+            ).to.be.revertedWithCustomError(badges, "AccessControlUnauthorizedAccount");
+
+            await expect(
+                badges.connect(creator).modifyBadge(id, "Community", true, true, "ipfs://1")
+            ).to.be.revertedWithCustomError(badges, "Unauthorized");
+
+            await badges.createBadge("For Promotion", false, true, "ipfs://2", [], [], [], [creator.address]);
+            const id2 = STARTING_BADGE_ID + 2n;
+
+            await expect(badges.connect(creator).modifyBadge(id2, "Now Official", true, true, "ipfs://2"))
+                .to.emit(badges, "BadgeModified");
+
+            const badge = await badges.badges(id2);
+            expect(badge.isOfficial).to.be.true;
+        });
+
+        it("Should only allow OFFICIAL_BADGE_CREATOR_ROLE to demote an official badge", async function () {
+            await badges.connect(creator).createBadge("Official", true, false, "ipfs://3", [], [], [], [user1.address, creator.address]);
+            const id = STARTING_BADGE_ID + 1n;
+
+            await expect(
+                badges.connect(user1).modifyBadge(id, "Official", false, true, "ipfs://3")
+            ).to.be.revertedWithCustomError(badges, "AccessControlUnauthorizedAccount");
+
+            await expect(badges.connect(creator).modifyBadge(id, "Demoted", false, true, "ipfs://3"))
+                .to.emit(badges, "BadgeModified");
+
+            const badge = await badges.badges(id);
+            expect(badge.isOfficial).to.be.false;
+        });
+    });
+
     describe("Profiles", function () {
         it("Should create a profile and allow self-minting internally", async function () {
             await badges.connect(user1).createProfile("ipfs://profile");
