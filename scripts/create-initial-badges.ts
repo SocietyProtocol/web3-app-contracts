@@ -1,7 +1,7 @@
 import { ethers } from "hardhat";
 
 async function main() {
-    const BADGES_CONTRACT_ADDRESS = process.env.BADGES_CONTRACT_ADDRESS;
+    const BADGES_CONTRACT_ADDRESS = "0xB5dbC7de177cEf1f615FcbF97e85479F3D022238";
 
     if (!BADGES_CONTRACT_ADDRESS) {
         throw new Error("BADGES_CONTRACT_ADDRESS environment variable is not set. Please run: BADGES_CONTRACT_ADDRESS=<ADDRESS> npx hardhat run ...");
