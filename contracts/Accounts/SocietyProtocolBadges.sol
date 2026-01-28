@@ -121,6 +121,7 @@ contract SocietyProtocolBadges is
         string memory name,
         bool isOfficial,
         bool isCommunity,
+        address hook,
         string memory metadataURI,
         uint256[] memory minters,
         uint256[] memory transferers,
@@ -142,6 +143,7 @@ contract SocietyProtocolBadges is
                 name,
                 isOfficial,
                 isCommunity,
+                hook,
                 metadataURI,
                 minters,
                 transferers,
@@ -166,6 +168,7 @@ contract SocietyProtocolBadges is
             "Profile",
             false,
             false,
+            address(0),
             metadataURI,
             empty,
             empty,
@@ -186,6 +189,7 @@ contract SocietyProtocolBadges is
         string memory name,
         bool isOfficial,
         bool isCommunity,
+        address hook,
         string memory metadataURI,
         uint256[] memory minters,
         uint256[] memory transferers,
@@ -197,11 +201,15 @@ contract SocietyProtocolBadges is
 
         badges[id] = BadgeInfo({
             name: name,
-            hook: address(0),
+            hook: hook,
             isOfficial: isOfficial,
             isCommunity: isCommunity,
             metadataURI: metadataURI
         });
+
+        if (hook != address(0)) {
+            emit HookUpdated(id, hook);
+        }
 
         canMint[id] = minters;
         canTransfer[id] = transferers;
@@ -421,10 +429,7 @@ contract SocietyProtocolBadges is
                         }
                     }
                     if (rule >= STARTING_BADGE_ID) {
-                        if (
-                            balanceOf(msg.sender, rule) > 0 ||
-                            rule == uint256(uint160(msg.sender))
-                        ) {
+                        if (balanceOf(msg.sender, rule) > 0) {
                             allowed = true;
                             break;
                         }
