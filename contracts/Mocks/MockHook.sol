@@ -20,15 +20,35 @@ contract MockHook is ISocietyBadgeHook {
         allowBurn = _burn;
     }
 
-    function onCheckMint(address, address, uint256, uint256) external view returns (bool) {
+    function onCheckMint(
+        address,
+        address,
+        uint256,
+        uint256
+    ) external view returns (bool) {
         return allowMint;
     }
 
-    function onCheckTransfer(address, address, address, uint256, uint256) external view returns (bool) {
+    function onCheckTransfer(
+        address,
+        address,
+        address,
+        uint256,
+        uint256
+    ) external view returns (bool) {
         return allowTransfer;
     }
 
-    function onCheckBurn(address, address, uint256, uint256) external view returns (bool) {
+    function onCheckBurn(
+        address,
+        address,
+        uint256,
+        uint256
+    ) external view returns (bool) {
         return allowBurn;
+    }
+
+    function onBalanceOf(address, uint256) external pure returns (uint256) {
+        return 0;
     }
 }

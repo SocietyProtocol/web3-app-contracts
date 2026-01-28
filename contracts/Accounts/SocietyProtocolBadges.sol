@@ -297,6 +297,28 @@ contract SocietyProtocolBadges is
         return badges[id].metadataURI;
     }
 
+    function balanceOf(
+        address account,
+        uint256 id
+    ) public view override returns (uint256) {
+        address hook = badges[id].hook;
+        if (hook != address(0)) {
+            return ISocietyBadgeHook(hook).onBalanceOf(account, id);
+        }
+        return super.balanceOf(account, id);
+    }
+
+    function balanceOfBatch(
+        address[] memory accounts,
+        uint256[] memory ids
+    ) public view override returns (uint256[] memory) {
+        uint256[] memory batchBalances = new uint256[](accounts.length);
+        for (uint256 i = 0; i < accounts.length; ++i) {
+            batchBalances[i] = balanceOf(accounts[i], ids[i]);
+        }
+        return batchBalances;
+    }
+
     /// @notice Returns the list of badges required to mint the given badgeId
     function getBadgeMinters(
         uint256 id
@@ -399,7 +421,10 @@ contract SocietyProtocolBadges is
                         }
                     }
                     if (rule >= STARTING_BADGE_ID) {
-                        if (balanceOf(msg.sender, rule) > 0) {
+                        if (
+                            balanceOf(msg.sender, rule) > 0 ||
+                            rule == uint256(uint160(msg.sender))
+                        ) {
                             allowed = true;
                             break;
                         }

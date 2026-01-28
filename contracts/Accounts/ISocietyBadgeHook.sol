@@ -23,4 +23,9 @@ interface ISocietyBadgeHook {
         uint256 id,
         uint256 amount
     ) external view returns (bool);
+
+    function onBalanceOf(
+        address account,
+        uint256 id
+    ) external view returns (uint256);
 }
