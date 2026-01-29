@@ -6,6 +6,9 @@ import "@openzeppelin/contracts-upgradeable/access/AccessControlUpgradeable.sol"
 import "@openzeppelin/contracts-upgradeable/token/ERC1155/extensions/ERC1155SupplyUpgradeable.sol";
 import "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
 import "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
+import "@openzeppelin/contracts-upgradeable/utils/cryptography/EIP712Upgradeable.sol";
+import "@openzeppelin/contracts/utils/cryptography/SignatureChecker.sol";
+import "@openzeppelin/contracts/utils/Strings.sol";
 import "./ISocietyBadgeHook.sol";
 
 /// @title Society Protocol Badges
@@ -16,7 +19,8 @@ contract SocietyProtocolBadges is
     ERC1155Upgradeable,
     AccessControlUpgradeable,
     ERC1155SupplyUpgradeable,
-    UUPSUpgradeable
+    UUPSUpgradeable,
+    EIP712Upgradeable
 {
     bytes32 public constant OFFICIAL_BADGE_CREATOR_ROLE =
         keccak256("OFFICIAL_BADGE_CREATOR_ROLE");
@@ -27,6 +31,11 @@ contract SocietyProtocolBadges is
     uint256 public constant PERM_SELF = 1;
     uint256 public constant PERM_EVERYONE = 2;
     uint256 public constant STARTING_BADGE_ID = 10;
+
+    bytes32 private constant INVITE_TYPEHASH =
+        keccak256("Invite(address inviter,string message)");
+
+    mapping(address => address) public invitedBy;
 
     struct BadgeInfo {
         string name;
@@ -84,6 +93,7 @@ contract SocietyProtocolBadges is
     );
     event HookUpdated(uint256 indexed id, address indexed hook);
     event ProfileCreated(address indexed user, uint256 indexed id);
+    event UserInvited(address indexed user, address indexed inviter);
 
     // Custom Errors
     error Unauthorized();
@@ -96,6 +106,9 @@ contract SocietyProtocolBadges is
     error MintNotAuthorized();
     error TransferNotAuthorized();
     error BurnNotAuthorized();
+    error AlreadyInvited();
+    error InvalidSignature();
+    error SelfInvitation();
 
     /// @custom:oz-upgrades-unsafe-allow constructor
     constructor() {
@@ -107,6 +120,7 @@ contract SocietyProtocolBadges is
         __AccessControl_init();
         __ERC1155Supply_init();
         __UUPSUpgradeable_init();
+        __EIP712_init("SocietyProtocol", "1");
 
         _grantRole(DEFAULT_ADMIN_ROLE, msg.sender);
         _grantRole(CONTRACT_UPGRADER_ROLE, msg.sender);
@@ -339,6 +353,49 @@ contract SocietyProtocolBadges is
         uint256 id
     ) external view returns (uint256[] memory) {
         return canTransfer[id];
+    }
+
+    /**
+     * @notice Accepts an invitation from another user
+     * @param inviter The address that issued the invite
+     * @param message The message that was signed
+     * @param signature The EIP-712 signature from the inviter
+     */
+    function acceptInvite(
+        address inviter,
+        string calldata message,
+        bytes calldata signature
+    ) external {
+        if (invitedBy[msg.sender] != address(0)) revert AlreadyInvited();
+        if (inviter == msg.sender) revert SelfInvitation();
+
+        bytes memory msgBytes = bytes(message);
+        uint256 len = msgBytes.length;
+        if (len < 42) revert InvalidSignature();
+
+        bytes memory addressBytes = new bytes(42);
+        for (uint256 i = 0; i < 42; i++) {
+            addressBytes[i] = msgBytes[len - 42 + i];
+        }
+
+        if (
+            keccak256(addressBytes) !=
+            keccak256(bytes(Strings.toHexString(msg.sender)))
+        ) {
+            revert InvalidSignature();
+        }
+
+        bytes32 structHash = keccak256(
+            abi.encode(INVITE_TYPEHASH, inviter, keccak256(bytes(message)))
+        );
+        bytes32 hash = _hashTypedDataV4(structHash);
+
+        if (!SignatureChecker.isValidSignatureNow(inviter, hash, signature)) {
+            revert InvalidSignature();
+        }
+
+        invitedBy[msg.sender] = inviter;
+        emit UserInvited(msg.sender, inviter);
     }
 
     /// @notice Returns the list of badges required to burn the given badgeId
