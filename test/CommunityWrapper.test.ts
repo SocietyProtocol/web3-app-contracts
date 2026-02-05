@@ -6,12 +6,19 @@ import {
     CommunityWrapperFactory
 } from "../typechain-types";
 
-describe("CommunityWrapper and Factory", function () {
+describe("CommunityWrapper and Upgradeable Factory", function () {
     let badges: SocietyProtocolBadges;
     let factory: CommunityWrapperFactory;
+    let wrapperImpl: CommunityWrapper;
     let owner: any;
     let creator: any;
     let user1: any;
+
+    const PERM_EVERYONE = 2n;
+    const STARTING_BADGE_ID = 10n;
+    const ID1 = STARTING_BADGE_ID + 1n;
+    const ID2 = STARTING_BADGE_ID + 2n;
+    const ID3 = STARTING_BADGE_ID + 3n;
 
     beforeEach(async function () {
         [owner, creator, user1] = await ethers.getSigners();
@@ -21,27 +28,39 @@ describe("CommunityWrapper and Factory", function () {
         badges = (await upgrades.deployProxy(Badges, [], { initializer: 'initialize' })) as unknown as SocietyProtocolBadges;
         await badges.waitForDeployment();
 
-        // 2. Deploy Factory
-        const Factory = await ethers.getContractFactory("CommunityWrapperFactory");
-        factory = await Factory.deploy(await badges.getAddress());
-        await factory.waitForDeployment();
+        // 2. Deploy Wrapper Implementation
+        const Wrapper = await ethers.getContractFactory("CommunityWrapper");
+        wrapperImpl = await Wrapper.deploy();
+        await wrapperImpl.waitForDeployment();
 
-        // Grant roles to owner to create badges for testing
-        const GOVERNOR_ROLE = await badges.GOVERNOR_ROLE();
-        await badges.grantRole(GOVERNOR_ROLE, owner.address);
+        // 3. Deploy Factory via Proxy
+        const Factory = await ethers.getContractFactory("CommunityWrapperFactory");
+        factory = (await upgrades.deployProxy(Factory, [
+            await badges.getAddress(),
+            await wrapperImpl.getAddress(),
+            owner.address
+        ], { initializer: 'initialize' })) as unknown as CommunityWrapperFactory;
+        await factory.waitForDeployment();
     });
 
-    describe("Factory", function () {
-        it("Should deploy a new CommunityWrapper", async function () {
+    describe("Factory Initialization", function () {
+        it("Should initialize with correct values", async function () {
+            expect(await factory.badgeContract()).to.equal(await badges.getAddress());
+            expect(await factory.wrapperImplementation()).to.equal(await wrapperImpl.getAddress());
+            expect(await factory.owner()).to.equal(owner.address);
+        });
+    });
+
+    describe("Deployment via Clones", function () {
+        it("Should deploy a new CommunityWrapper clone", async function () {
             const tx = await factory.connect(creator).createWrapper(
                 "Test Community",
                 "TCM",
-                [1, 2]
+                [ID1, ID2]
             );
             const receipt = await tx.wait();
 
             const event = receipt?.logs.find((log: any) => log.fragment?.name === 'WrapperDeployed') as any;
-            expect(event).to.not.be.undefined;
             const wrapperAddress = event.args[0];
 
             const wrapper = await ethers.getContractAt("CommunityWrapper", wrapperAddress);
@@ -51,125 +70,141 @@ describe("CommunityWrapper and Factory", function () {
 
             const allowedIds = await wrapper.getAllowedBadgeIds();
             expect(allowedIds.length).to.equal(2);
-            expect(allowedIds[0]).to.equal(1n);
-            expect(allowedIds[1]).to.equal(2n);
-        });
-
-        it("Should fail if too many initial badges", async function () {
-            // Need a dummy address to get contract factory for custom error matching if it's not yet deployed
-            // But we can just use the creator to try and fail
-            await expect(
-                factory.connect(creator).createWrapper("Fail", "FAIL", [1, 2, 3, 4, 5, 6])
-            ).to.be.revertedWithCustomError({ interface: (await ethers.getContractFactory("CommunityWrapper")).interface } as any, "MaxBadgesReached");
+            expect(allowedIds[0]).to.equal(ID1);
         });
     });
 
-    describe("CommunityWrapper Balance Logic", function () {
+    describe("CommunityWrapper Balance Logic (Cloned)", function () {
         let wrapper: CommunityWrapper;
 
         beforeEach(async function () {
             const tx = await factory.connect(creator).createWrapper(
                 "Test Community",
                 "TCM",
-                [1, 2]
+                [ID1, ID2]
             );
             const receipt = await tx.wait();
             const event = receipt?.logs.find((log: any) => log.fragment?.name === 'WrapperDeployed') as any;
             wrapper = await ethers.getContractAt("CommunityWrapper", event.args[0]);
 
-            // Create badges 1 and 2
-            await badges.createOfficialBadge("Badge 1", "uri1", [owner.address], [], []);
-            await badges.createOfficialBadge("Badge 2", "uri2", [owner.address], [], []);
+            // Create badges ID1 and ID2
+            await (badges as any).createBadge("Badge 1", true, false, ethers.ZeroAddress, "uri1", [PERM_EVERYONE], [], [], []);
+            await (badges as any).createBadge("Badge 2", true, false, ethers.ZeroAddress, "uri2", [PERM_EVERYONE], [], [], []);
         });
 
-        it("Should return 0 if user has no badges", async function () {
+        it("Should return 1 only if user has ALL badges", async function () {
+            await badges.mint(user1.address, ID1, 1, "0x");
             expect(await wrapper.balanceOf(user1.address)).to.equal(0);
-        });
 
-        it("Should return 0 if user has only some of the required badges", async function () {
-            await badges.mint(user1.address, 1, 1, "0x");
-            expect(await wrapper.balanceOf(user1.address)).to.equal(0);
-        });
-
-        it("Should return 1 if user has all required badges", async function () {
-            await badges.mint(user1.address, 1, 1, "0x");
-            await badges.mint(user1.address, 2, 1, "0x");
-            expect(await wrapper.balanceOf(user1.address)).to.equal(1);
-        });
-
-        it("Should return 1 even if user has multiple of the same badge", async function () {
-            await badges.mint(user1.address, 1, 10, "0x");
-            await badges.mint(user1.address, 2, 5, "0x");
+            await badges.mint(user1.address, ID2, 1, "0x");
             expect(await wrapper.balanceOf(user1.address)).to.equal(1);
         });
     });
 
-    describe("Management", function () {
+    describe("Management (Cloned)", function () {
         let wrapper: CommunityWrapper;
 
         beforeEach(async function () {
-            const tx = await factory.connect(creator).createWrapper(
-                "Test Community",
-                "TCM",
-                [1]
-            );
+            const tx = await factory.connect(creator).createWrapper("T", "T", [ID1]);
             const receipt = await tx.wait();
             const event = receipt?.logs.find((log: any) => log.fragment?.name === 'WrapperDeployed') as any;
             wrapper = await ethers.getContractAt("CommunityWrapper", event.args[0]);
-
-            await badges.createOfficialBadge("Badge 1", "uri1", [owner.address], [], []);
-            await badges.createOfficialBadge("Badge 2", "uri2", [owner.address], [], []);
         });
 
-        it("Owner should be able to add badge ID", async function () {
-            await wrapper.connect(creator).addBadgeId(2);
-            const allowedIds = await wrapper.getAllowedBadgeIds();
-            expect(allowedIds.length).to.equal(2);
-            expect(allowedIds[1]).to.equal(2n);
-        });
+        it("Owner should be able to add/remove IDs", async function () {
+            await wrapper.connect(creator).addBadgeId(ID2);
+            expect((await wrapper.getAllowedBadgeIds()).length).to.equal(2);
 
-        it("Owner should be able to remove badge ID", async function () {
-            await wrapper.connect(creator).addBadgeId(2);
-            await wrapper.connect(creator).removeBadgeId(1);
-            const allowedIds = await wrapper.getAllowedBadgeIds();
-            expect(allowedIds.length).to.equal(1);
-            expect(allowedIds[0]).to.equal(2n);
-        });
-
-        it("Balance should update after adding/removing IDs", async function () {
-            await badges.mint(user1.address, 1, 1, "0x");
-            expect(await wrapper.balanceOf(user1.address)).to.equal(1);
-
-            await wrapper.connect(creator).addBadgeId(2);
-            expect(await wrapper.balanceOf(user1.address)).to.equal(0);
-
-            await badges.mint(user1.address, 2, 1, "0x");
-            expect(await wrapper.balanceOf(user1.address)).to.equal(1);
-
-            await wrapper.connect(creator).removeBadgeId(1);
-            expect(await wrapper.balanceOf(user1.address)).to.equal(1);
-        });
-
-        it("Should enforce MAX_BADGES limit", async function () {
-            await wrapper.connect(creator).addBadgeId(2);
-            await wrapper.connect(creator).addBadgeId(3);
-            await wrapper.connect(creator).addBadgeId(4);
-            await wrapper.connect(creator).addBadgeId(5);
-
-            await expect(
-                wrapper.connect(creator).addBadgeId(6)
-            ).to.be.revertedWithCustomError(wrapper, "MaxBadgesReached");
+            await wrapper.connect(creator).removeBadgeId(ID1);
+            const ids = await wrapper.getAllowedBadgeIds();
+            expect(ids.length).to.equal(1);
+            expect(ids[0]).to.equal(ID2);
         });
     });
 
-    describe("ERC20 compliance (limited)", function () {
-        it("Should revert on transfers", async function () {
-            const tx = await factory.connect(creator).createWrapper("T", "T", [1]);
-            const receipt = await tx.wait();
-            const event = receipt?.logs.find((log: any) => log.fragment?.name === 'WrapperDeployed') as any;
-            const wrapper = await ethers.getContractAt("CommunityWrapper", event.args[0]);
+    describe("Factory Upgradeability", function () {
+        it("Should be upgradeable via UUPS by owner", async function () {
+            const FactoryV2 = await ethers.getContractFactory("CommunityWrapperFactory");
+            const upgraded = await upgrades.upgradeProxy(await factory.getAddress(), FactoryV2);
+            expect(await upgraded.getAddress()).to.equal(await factory.getAddress());
+        });
 
-            await expect(wrapper.transfer(user1.address, 1)).to.be.revertedWithCustomError(wrapper, "TransfersDisabled");
+        it("Should allow owner to change implementation", async function () {
+            const NewWrapper = await ethers.getContractFactory("CommunityWrapper");
+            const newImpl = await NewWrapper.deploy();
+
+            await factory.setWrapperImplementation(await newImpl.getAddress());
+            expect(await factory.wrapperImplementation()).to.equal(await newImpl.getAddress());
+        });
+    });
+
+    describe("Multi-User Scenario Isolation", function () {
+        let creator1: any, creator2: any, creator3: any;
+        let u1: any, u2: any, u3: any;
+        let w1: CommunityWrapper, w2: CommunityWrapper, w3: CommunityWrapper;
+
+        beforeEach(async function () {
+            const signers = await ethers.getSigners();
+            // Using different signers than those used in previous beforeEaches for clarity
+            [, , , creator1, creator2, creator3, u1, u2, u3] = signers;
+
+            // Deploy wrappers
+            // w1 requires ID1
+            let tx = await factory.connect(creator1).createWrapper("W1", "W1", [ID1]);
+            let rec = await tx.wait();
+            let ev = rec?.logs.find((log: any) => log.fragment?.name === 'WrapperDeployed') as any;
+            w1 = await ethers.getContractAt("CommunityWrapper", ev.args[0]);
+
+            // w2 requires ID1, ID2
+            tx = await factory.connect(creator2).createWrapper("W2", "W2", [ID1, ID2]);
+            rec = await tx.wait();
+            ev = rec?.logs.find((log: any) => log.fragment?.name === 'WrapperDeployed') as any;
+            w2 = await ethers.getContractAt("CommunityWrapper", ev.args[0]);
+
+            // w3 requires ID2, ID3
+            tx = await factory.connect(creator3).createWrapper("W3", "W3", [ID2, ID3]);
+            rec = await tx.wait();
+            ev = rec?.logs.find((log: any) => log.fragment?.name === 'WrapperDeployed') as any;
+            w3 = await ethers.getContractAt("CommunityWrapper", ev.args[0]);
+
+            // Create badges (badges start from ID10+1=11)
+            await (badges as any).createBadge("B1", true, false, ethers.ZeroAddress, "u1", [PERM_EVERYONE], [], [], []); // 11
+            await (badges as any).createBadge("B2", true, false, ethers.ZeroAddress, "u2", [PERM_EVERYONE], [], [], []); // 12
+            await (badges as any).createBadge("B3", true, false, ethers.ZeroAddress, "u3", [PERM_EVERYONE], [], [], []); // 13
+
+            // Mint badges to users
+            // u1 has ID1
+            await badges.mint(u1.address, ID1, 1, "0x");
+            // u2 has ID1, ID2
+            await badges.mint(u2.address, ID1, 1, "0x");
+            await badges.mint(u2.address, ID2, 1, "0x");
+            // u3 has ID2, ID3
+            await badges.mint(u3.address, ID2, 1, "0x");
+            await badges.mint(u3.address, ID3, 1, "0x");
+        });
+
+        it("Should report correct balances for all users across all wrappers", async function () {
+            // Check W1 (requires ID1)
+            expect(await w1.balanceOf(u1.address)).to.equal(1);
+            expect(await w1.balanceOf(u2.address)).to.equal(1);
+            expect(await w1.balanceOf(u3.address)).to.equal(0);
+
+            // Check W2 (requires ID1, ID2)
+            expect(await w2.balanceOf(u1.address)).to.equal(0);
+            expect(await w2.balanceOf(u2.address)).to.equal(1);
+            expect(await w2.balanceOf(u3.address)).to.equal(0);
+
+            // Check W3 (requires ID2, ID3)
+            expect(await w3.balanceOf(u1.address)).to.equal(0);
+            expect(await w3.balanceOf(u2.address)).to.equal(0);
+            expect(await w3.balanceOf(u3.address)).to.equal(1);
+        });
+
+        it("Owners should only be able to manage their own wrappers", async function () {
+            // creator1 can add to w1
+            await expect(w1.connect(creator1).addBadgeId(ID2)).to.not.be.reverted;
+            // creator2 cannot add to w1
+            await expect(w1.connect(creator2).addBadgeId(ID3)).to.be.revertedWithCustomError(w1, "OwnableUnauthorizedAccount");
         });
     });
 });

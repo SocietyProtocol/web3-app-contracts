@@ -1,17 +1,23 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.28;
 
-import "@openzeppelin/contracts/token/ERC20/ERC20.sol";
+import "@openzeppelin/contracts-upgradeable/token/ERC20/ERC20Upgradeable.sol";
+import "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
+import "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
 import "@openzeppelin/contracts/token/ERC1155/IERC1155.sol";
-import "@openzeppelin/contracts/access/Ownable.sol";
 
 /**
  * @title CommunityWrapper
  * @notice A non-transferable ERC20 wrapper that returns a binary balance based on ERC1155 badge ownership.
  * @dev Balance is 1 if the user holds all required badges, 0 otherwise.
+ * @dev This contract is designed to be used with the Clones pattern.
  */
-contract CommunityWrapper is ERC20, Ownable {
-    address public immutable badgeContract;
+contract CommunityWrapper is
+    Initializable,
+    ERC20Upgradeable,
+    OwnableUpgradeable
+{
+    address public badgeContract;
     uint256[] public allowedBadgeIds;
     uint256 public constant MAX_BADGES = 5;
 
@@ -19,14 +25,31 @@ contract CommunityWrapper is ERC20, Ownable {
     error BadgeAlreadyAdded();
     error BadgeNotFound();
     error TransfersDisabled();
+    error AlreadyInitialized();
 
-    constructor(
+    /// @custom:oz-upgrades-unsafe-allow constructor
+    constructor() {
+        _disableInitializers();
+    }
+
+    /**
+     * @notice Initializes the wrapper.
+     * @param name ERC20 name for the wrapper.
+     * @param symbol ERC20 symbol for the wrapper.
+     * @param _badgeContract Address of the ERC1155 badge contract.
+     * @param _initialBadgeIds Initial list of required badge IDs.
+     * @param _owner Address that will own the wrapper.
+     */
+    function initialize(
         string memory name,
         string memory symbol,
         address _badgeContract,
         uint256[] memory _initialBadgeIds,
         address _owner
-    ) ERC20(name, symbol) Ownable(_owner) {
+    ) public initializer {
+        __ERC20_init(name, symbol);
+        __Ownable_init(_owner);
+
         require(_badgeContract != address(0), "Invalid badge contract");
         if (_initialBadgeIds.length > MAX_BADGES) revert MaxBadgesReached();
 
