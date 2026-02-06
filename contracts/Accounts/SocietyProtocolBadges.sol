@@ -296,6 +296,46 @@ contract SocietyProtocolBadges is
         _mint(to, id, amount, data);
     }
 
+    /**
+     * @notice Mints multiple badges to a single recipient
+     * @param to The recipient address
+     * @param ids Array of badge IDs to mint
+     * @param amounts Array of amounts for each badge ID
+     * @param data Additional data for the minting operation
+     */
+    function mintBatch(
+        address to,
+        uint256[] memory ids,
+        uint256[] memory amounts,
+        bytes memory data
+    ) public {
+        for (uint256 i = 0; i < ids.length; i++) {
+            if (ids[i] > nextTokenId) revert BadgeDoesNotExist();
+        }
+        // Permission check is done in _update
+        _mintBatch(to, ids, amounts, data);
+    }
+
+    /**
+     * @notice Mints a single badge to multiple recipients
+     * @param to Array of recipient addresses
+     * @param id The badge ID to mint
+     * @param amount The amount to mint for each recipient
+     * @param data Additional data for the minting operation
+     */
+    function mintToMultiple(
+        address[] memory to,
+        uint256 id,
+        uint256 amount,
+        bytes memory data
+    ) public {
+        if (id > nextTokenId) revert BadgeDoesNotExist();
+        for (uint256 i = 0; i < to.length; i++) {
+            // Permission check is done in _update for each mint
+            _mint(to[i], id, amount, data);
+        }
+    }
+
     /// @notice Updates the metadata URI for a badge
     /// @dev Only callable by editors
     function setURI(uint256 id, string memory newUri) external {

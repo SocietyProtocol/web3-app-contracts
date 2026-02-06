@@ -297,4 +297,64 @@ describe("Society Protocol Badges (Upgradeable) - Refactored", function () {
             ).to.be.reverted; // AccessControl revert
         });
     });
+
+    describe("Bulk Minting", function () {
+        let badge1: bigint;
+        let badge2: bigint;
+
+        beforeEach(async function () {
+            // Create two public badges
+            await badges.createBadge("Badge1", false, true, ethers.ZeroAddress, "ipfs://1", [PERM_EVERYONE], [], [], [owner.address]);
+            badge1 = STARTING_BADGE_ID + 1n;
+            await badges.createBadge("Badge2", false, true, ethers.ZeroAddress, "ipfs://2", [PERM_EVERYONE], [], [], [owner.address]);
+            badge2 = STARTING_BADGE_ID + 2n;
+        });
+
+        it("Should allow mintBatch to a single recipient", async function () {
+            await badges.mintBatch(user1.address, [badge1, badge2], [10, 20], "0x");
+            expect(await badges.balanceOf(user1.address, badge1)).to.equal(10n);
+            expect(await badges.balanceOf(user1.address, badge2)).to.equal(20n);
+        });
+
+        it("Should allow mintToMultiple for a single badge", async function () {
+            await badges.mintToMultiple([user1.address, user2.address], badge1, 5, "0x");
+            expect(await badges.balanceOf(user1.address, badge1)).to.equal(5n);
+            expect(await badges.balanceOf(user2.address, badge1)).to.equal(5n);
+        });
+
+        it("Should revert mintBatch if any badge doesn't meet restrictions", async function () {
+            // Create a restricted badge
+            await badges.createBadge("Restricted", false, false, ethers.ZeroAddress, "ipfs://r", [PERM_SELF], [], [], [owner.address]);
+            const restrictedBadge = STARTING_BADGE_ID + 3n;
+
+            // user2 tries to mintBadge including the restricted one to user1
+            // This should fail because user2 is not authorized to mint 'restrictedBadge' to 'user1' (only user1 can mint to themselves)
+            await expect(
+                badges.connect(user2).mintBatch(user1.address, [badge1, restrictedBadge], [1, 1], "0x")
+            ).to.be.revertedWithCustomError(badges, "MintNotAuthorized");
+        });
+
+        it("Should revert mintBatch if any badge does not exist", async function () {
+            await expect(
+                badges.mintBatch(user1.address, [badge1, 999n], [1, 1], "0x")
+            ).to.be.revertedWithCustomError(badges, "BadgeDoesNotExist");
+        });
+
+        it("Should revert mintToMultiple if any recipient is blocked by hook", async function () {
+            // Deploy a hook that blocks user2
+            const Hook = await ethers.getContractFactory("MockHook");
+            const blockingHook = await Hook.deploy(true, true, true);
+            await blockingHook.waitForDeployment();
+
+            // Set hook to block minting
+            await blockingHook.setPermissions(false, true, true);
+
+            await badges.createBadge("Hooked", false, false, await blockingHook.getAddress(), "ipfs://h", [PERM_EVERYONE], [], [], [owner.address]);
+            const hookedBadge = STARTING_BADGE_ID + 3n;
+
+            await expect(
+                badges.mintToMultiple([user1.address, user2.address], hookedBadge, 1, "0x")
+            ).to.be.revertedWithCustomError(badges, "MintDeniedByHook");
+        });
+    });
 });

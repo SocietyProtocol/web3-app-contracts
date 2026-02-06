@@ -1,7 +1,7 @@
 import { ethers, upgrades, run, network } from "hardhat";
 
 async function main() {
-    const proxyAddress = "0x6F72d047eEC67024d2c8BC9FA17fC6659a0dA6d8";
+    const proxyAddress = "0x76Aa1B43a651acc4320a4610af896ddfe38B428a";
 
     if (!proxyAddress) {
         throw new Error("PROXY_ADDRESS environment variable is not set");
