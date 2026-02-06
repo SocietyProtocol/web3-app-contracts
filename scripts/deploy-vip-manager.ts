@@ -2,9 +2,9 @@ import { ethers, upgrades, run, network } from "hardhat";
 
 async function main() {
     // These should be set based on your deployment environment
-    const STAKING_TOKEN_ADDRESS = process.env.STAKING_TOKEN_ADDRESS || "0x0000000000000000000000000000000000000000";
-    const BADGES_CONTRACT_ADDRESS = process.env.BADGES_CONTRACT_ADDRESS || "0x0000000000000000000000000000000000000000";
-    const GOVERNOR_BADGE_ID = process.env.GOVERNOR_BADGE_ID || "1";
+    const STAKING_TOKEN_ADDRESS = process.env.STAKING_TOKEN_ADDRESS || "0xe4a566a04aed9f938bba16d47d859a706bc4949a";
+    const BADGES_CONTRACT_ADDRESS = process.env.BADGES_CONTRACT_ADDRESS || "0x76Aa1B43a651acc4320a4610af896ddfe38B428a";
+    const GOVERNOR_BADGE_ID = process.env.GOVERNOR_BADGE_ID || "21";
 
     if (STAKING_TOKEN_ADDRESS === ethers.ZeroAddress || BADGES_CONTRACT_ADDRESS === ethers.ZeroAddress) {
         console.warn("WARNING: STAKING_TOKEN_ADDRESS or BADGES_CONTRACT_ADDRESS is not set correctly.");
@@ -21,7 +21,7 @@ async function main() {
         BADGES_CONTRACT_ADDRESS,
         GOVERNOR_BADGE_ID
     ], {
-        initializer: "initialize",
+        initializer: false,
         kind: "uups",
     });
 
