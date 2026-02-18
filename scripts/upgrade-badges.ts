@@ -12,6 +12,11 @@ async function main() {
     const factory = await ethers.getContractFactory("SocietyProtocolBadges");
 
     // upgradeProxy(proxyAddress, ContractFactory, opts)
+    try {
+        await upgrades.forceImport(proxyAddress, factory);
+    } catch (e) {
+        console.log("forceImport failed, continuing anyway...", e);
+    }
     const contract = await upgrades.upgradeProxy(proxyAddress, factory);
 
     await contract.waitForDeployment();

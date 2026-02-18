@@ -8,6 +8,7 @@ import "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
 import "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
 import "@openzeppelin/contracts-upgradeable/utils/cryptography/EIP712Upgradeable.sol";
 import "@openzeppelin/contracts/utils/cryptography/SignatureChecker.sol";
+import "@openzeppelin/contracts/utils/cryptography/MessageHashUtils.sol";
 import "@openzeppelin/contracts/utils/Strings.sol";
 import "./ISocietyBadgeHook.sol";
 
@@ -431,7 +432,19 @@ contract SocietyProtocolBadges is
         bytes32 hash = _hashTypedDataV4(structHash);
 
         if (!SignatureChecker.isValidSignatureNow(inviter, hash, signature)) {
-            revert InvalidSignature();
+            // Try matching against EthSignedMessageHash (personal_sign)
+            bytes32 ethSignedHash = MessageHashUtils.toEthSignedMessageHash(
+                bytes(message)
+            );
+            if (
+                !SignatureChecker.isValidSignatureNow(
+                    inviter,
+                    ethSignedHash,
+                    signature
+                )
+            ) {
+                revert InvalidSignature();
+            }
         }
 
         invitedBy[msg.sender] = inviter;

@@ -162,4 +162,16 @@ describe("Society Protocol Badges - Invite System", function () {
             badges.connect(guest).acceptInvite(guest.address, message, signature)
         ).to.be.revertedWithCustomError(badges, "SelfInvitation");
     });
+
+    it("User's frontend uses signMessage (Should Fail currently, but goal is to make it Pass)", async function () {
+        const message = `Sign this message to generate a referral code for the address: ${guest.address.toLowerCase()}`;
+
+        // Frontend uses signMessage (Personal Sign) -> produce EthSignedMessageHash
+        const signature = await owner.signMessage(message);
+
+        // Verify
+        // This should now PASS with the contract fix
+        await badges.connect(guest).acceptInvite(owner.address, message, signature);
+        expect(await badges.invitedBy(guest.address)).to.equal(owner.address);
+    });
 });
