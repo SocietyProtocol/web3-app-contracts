@@ -318,6 +318,68 @@ contract SocietyProtocolBadges is
     }
 
     /**
+     * @notice Overrides standard safeTransferFrom to allow transfers based on badge permissions
+     * @dev Bypasses standard isApprovedForAll check. Security is enforced in _update hook.
+     */
+    function safeTransferFrom(
+        address from,
+        address to,
+        uint256 id,
+        uint256 value,
+        bytes memory data
+    ) public override {
+        // We skip the standard approval check since we want our badge-based
+        // permissions in _update to be the sole authority.
+        _safeTransferFrom(from, to, id, value, data);
+    }
+
+    /**
+     * @notice Overrides standard safeBatchTransferFrom to allow transfers based on badge permissions
+     * @dev Bypasses standard isApprovedForAll check. Security is enforced in _update hook.
+     */
+    function safeBatchTransferFrom(
+        address from,
+        address to,
+        uint256[] memory ids,
+        uint256[] memory values,
+        bytes memory data
+    ) public override {
+        // We skip the standard approval check since we want our badge-based
+        // permissions in _update to be the sole authority.
+        _safeBatchTransferFrom(from, to, ids, values, data);
+    }
+
+    /**
+     * @notice Burns tokens from a specified address
+     * @dev Bypasses standard isApprovedForAll check. Security is enforced in _update hook.
+     * @param from The address to burn from
+     * @param id The badge ID to burn
+     * @param value The amount to burn
+     */
+    function burn(address from, uint256 id, uint256 value) public {
+        if (id > nextTokenId) revert BadgeDoesNotExist();
+        _burn(from, id, value);
+    }
+
+    /**
+     * @notice Burns multiple badges from a specified address
+     * @dev Bypasses standard isApprovedForAll check. Security is enforced in _update hook.
+     * @param from The address to burn from
+     * @param ids Array of badge IDs to burn
+     * @param values Array of amounts to burn for each badge ID
+     */
+    function burnBatch(
+        address from,
+        uint256[] memory ids,
+        uint256[] memory values
+    ) public {
+        for (uint256 i = 0; i < ids.length; i++) {
+            if (ids[i] > nextTokenId) revert BadgeDoesNotExist();
+        }
+        _burnBatch(from, ids, values);
+    }
+
+    /**
      * @notice Mints a single badge to multiple recipients
      * @param to Array of recipient addresses
      * @param id The badge ID to mint
