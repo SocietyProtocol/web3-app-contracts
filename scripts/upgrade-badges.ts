@@ -12,15 +12,24 @@ async function main() {
     const factory = await ethers.getContractFactory("SocietyProtocolBadges");
 
     // upgradeProxy(proxyAddress, ContractFactory, opts)
-    try {
-        await upgrades.forceImport(proxyAddress, factory);
-    } catch (e) {
-        console.log("forceImport failed, continuing anyway...", e);
-    }
-    const contract = await upgrades.upgradeProxy(proxyAddress, factory);
+    // try {
+    //     await upgrades.forceImport(proxyAddress, factory);
+    // } catch (e) {
+    //     console.log("forceImport failed, continuing anyway...", e);
+    // }
+    const contract = await upgrades.upgradeProxy(proxyAddress, factory, {
+        redeployImplementation: "always"
+    });
 
     await contract.waitForDeployment();
     console.log("SocietyProtocolBadges upgraded successfully");
+
+    // Wait for the RPC nodes to sync BEFORE fetching the new implementation address
+    if (network.name !== "hardhat" && network.name !== "localhost") {
+        console.log("Waiting 30 seconds for Sepolia RPC to sync the new state...");
+        // This halts the script for 30 seconds, ensuring we don't read stale ghost-data
+        await new Promise((resolve) => setTimeout(resolve, 30000));
+    }
 
     const newImplementationAddress = await upgrades.erc1967.getImplementationAddress(await contract.getAddress());
     console.log("New implementation address:", newImplementationAddress);
