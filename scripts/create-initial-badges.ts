@@ -1,10 +1,10 @@
 import { ethers } from "hardhat";
 
 async function main() {
-    const BADGES_CONTRACT_ADDRESS = "0x76Aa1B43a651acc4320a4610af896ddfe38B428a";
+    const BADGES_CONTRACT_ADDRESS = process.env.BADGES_CONTRACT_ADDRESS;
 
     if (!BADGES_CONTRACT_ADDRESS) {
-        throw new Error("BADGES_CONTRACT_ADDRESS environment variable is not set. Please run: BADGES_CONTRACT_ADDRESS=<ADDRESS> npx hardhat run ...");
+        throw new Error("BADGES_CONTRACT_ADDRESS environment variable is not set. Usage: BADGES_CONTRACT_ADDRESS=0x... npx hardhat run scripts/create-initial-badges.ts --network <network>");
     }
 
     const [deployer] = await ethers.getSigners();

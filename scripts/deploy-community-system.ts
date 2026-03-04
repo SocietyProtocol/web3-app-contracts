@@ -5,9 +5,9 @@ async function main() {
     console.log("Starting deployment with account:", deployer.address);
 
     // 1. Get or Deploy SocietyProtocolBadges
-    let badgesAddress = "0x76Aa1B43a651acc4320a4610af896ddfe38B428a";
+    let badgesAddress = process.env.BADGES_CONTRACT_ADDRESS;
     if (!badgesAddress) {
-        console.log("BADGES_ADDRESS not provided, deploying new SocietyProtocolBadges...");
+        console.log("BADGES_CONTRACT_ADDRESS not provided, deploying new SocietyProtocolBadges...");
         const Badges = await ethers.getContractFactory("SocietyProtocolBadges");
         const badges = await upgrades.deployProxy(Badges, [], { initializer: 'initialize' });
         await badges.waitForDeployment();

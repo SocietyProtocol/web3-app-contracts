@@ -1,10 +1,10 @@
 import { ethers, upgrades, run, network } from "hardhat";
 
 async function main() {
-    const proxyAddress = "0x76Aa1B43a651acc4320a4610af896ddfe38B428a";
+    const proxyAddress = process.env.PROXY_ADDRESS;
 
     if (!proxyAddress) {
-        throw new Error("PROXY_ADDRESS environment variable is not set");
+        throw new Error("PROXY_ADDRESS environment variable is not set. Usage: PROXY_ADDRESS=0x... npx hardhat run scripts/upgrade-badges.ts --network <network>");
     }
 
     console.log(`Upgrading SocietyProtocolBadges at proxy address: ${proxyAddress}`);
