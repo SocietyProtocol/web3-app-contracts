@@ -34,7 +34,7 @@ describe("Society Protocol Badges (Upgradeable) - Refactored", function () {
 
         // Deploy Mock Hook
         const Hook = await ethers.getContractFactory("MockHook");
-        hook = await Hook.deploy(true, true, true);
+        hook = (await Hook.deploy(true, true, true)) as unknown as MockHook;
         await hook.waitForDeployment();
     });
 
@@ -155,6 +155,17 @@ describe("Society Protocol Badges (Upgradeable) - Refactored", function () {
         it("Editor should be able to set URI", async function () {
             await badges.connect(creator).setURI(badgeId, "ipfs://uri-updated");
             expect(await badges.uri(badgeId)).to.equal("ipfs://uri-updated");
+        });
+
+        it("Should allow setting a hook by editor", async function () {
+            await badges.connect(creator).setBadgeHook(badgeId, await hook.getAddress());
+            const badge = await badges.badges(badgeId);
+            expect(badge.hook).to.equal(await hook.getAddress());
+        });
+
+        it("Should REVERT when non-editor sets a hook", async function () {
+            await expect(badges.connect(user1).setBadgeHook(badgeId, await hook.getAddress()))
+                .to.be.revertedWithCustomError(badges, "Unauthorized");
         });
     });
 
@@ -279,6 +290,22 @@ describe("Society Protocol Badges (Upgradeable) - Refactored", function () {
             // createProfile prevents creating another.
             await expect(badges.connect(user1).createProfile("ipfs://2")).to.be.revertedWithCustomError(badges, "ProfileAlreadyExists");
         });
+
+        it("Should allow profile owner to update URI", async function () {
+            await badges.connect(user1).createProfile("ipfs://p1");
+            const pid = await badges.profileBadgeId(user1.address);
+
+            await badges.connect(user1).updateProfileURI(pid, "ipfs://p2");
+            expect(await badges.uri(pid)).to.equal("ipfs://p2");
+        });
+
+        it("Should REVERT if non-owner updates profile URI", async function () {
+            await badges.connect(user1).createProfile("ipfs://p1");
+            const pid = await badges.profileBadgeId(user1.address);
+
+            await expect(badges.connect(user2).updateProfileURI(pid, "ipfs://p-hacked"))
+                .to.be.revertedWithCustomError(badges, "NotProfileOwner");
+        });
     });
 
     describe("Upgradeability", function () {
@@ -355,6 +382,33 @@ describe("Society Protocol Badges (Upgradeable) - Refactored", function () {
             await expect(
                 badges.mintToMultiple([user1.address, user2.address], hookedBadge, 1, "0x")
             ).to.be.revertedWithCustomError(badges, "MintDeniedByHook");
+        });
+
+        it("Should work with balanceOfBatch and hooks", async function () {
+            // Mock balance via hook
+            // (MockHook doesn't have sets for balanceOf, but we can verify it calls it)
+            // Existing MockHook returns 0 for onBalanceOf
+            const ids = [STARTING_BADGE_ID + 1n, STARTING_BADGE_ID + 2n];
+            const accounts = [user1.address, user2.address];
+
+            // This just verifies the loop/logic works
+            const balances = await badges.balanceOfBatch(accounts, ids);
+            expect(balances.length).to.equal(2);
+        });
+
+        it("Should support required interfaces", async function () {
+            const ERC1155_ID = "0xd9b67a26";
+            const ACCESS_CONTROL_ID = "0x7965db0b";
+            expect(await badges.supportsInterface(ERC1155_ID)).to.be.true;
+            expect(await badges.supportsInterface(ACCESS_CONTROL_ID)).to.be.true;
+        });
+
+        it("Should revert on operations with non-existent badges beyond nextTokenId", async function () {
+            const badId = 9999n;
+            await expect(badges.mint(user1.address, badId, 1, "0x"))
+                .to.be.revertedWithCustomError(badges, "BadgeDoesNotExist");
+            await expect(badges.burn(user1.address, badId, 1))
+                .to.be.revertedWithCustomError(badges, "BadgeDoesNotExist");
         });
     });
 });

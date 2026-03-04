@@ -25,7 +25,7 @@ describe("Society VIP Manager", function () {
 
         // 2. Deploy Staking Token
         const Token = await ethers.getContractFactory("MyToken");
-        stakingToken = await Token.deploy("Test Token", "TEST", ethers.parseEther("1000000"));
+        stakingToken = (await Token.deploy("Test Token", "TEST", ethers.parseEther("1000000"))) as unknown as MyToken;
         await stakingToken.waitForDeployment();
 
         // 3. Deploy VIP Manager via Proxy
@@ -127,6 +127,49 @@ describe("Society VIP Manager", function () {
         expect(after - before).to.equal(BRONZE_AMOUNT);
     });
 
+    describe("VipManager Edge Cases", function () {
+        it("Should revert if duration is less than MIN_LOCK_DURATION", async function () {
+            await expect(
+                vipManager.connect(user1).lock(BRONZE_AMOUNT, ONE_MONTH - 1)
+            ).to.be.revertedWithCustomError(vipManager, "LockDurationTooShort");
+        });
+
+        it("Should revert if unlocking with no tokens locked", async function () {
+            const [, , , user2] = await ethers.getSigners();
+            await expect(
+                vipManager.connect(user2).unlock()
+            ).to.be.revertedWithCustomError(vipManager, "NoTokensLocked");
+        });
+
+        it("Should properly extend an existing lock", async function () {
+            await vipManager.connect(user1).lock(BRONZE_AMOUNT, ONE_MONTH);
+            const lockBefore = await vipManager.locks(user1.address);
+
+            // Add more tokens and extend duration
+            await vipManager.connect(user1).lock(BRONZE_AMOUNT, ONE_MONTH * 2);
+            const lockAfter = await vipManager.locks(user1.address);
+
+            expect(lockAfter.amount).to.equal(BRONZE_AMOUNT * 2n);
+            expect(lockAfter.unlockTime).to.be.gt(lockBefore.unlockTime);
+        });
+
+        it("Should deny direct mint/transfer/burn via VIP hook", async function () {
+            const bronzeId = await vipManager.bronzeBadgeId();
+
+            expect(await vipManager.onCheckMint(owner.address, user1.address, bronzeId, 1))
+                .to.be.false;
+            expect(await vipManager.onCheckTransfer(owner.address, user1.address, owner.address, bronzeId, 1))
+                .to.be.false;
+            expect(await vipManager.onCheckBurn(owner.address, user1.address, bronzeId, 1))
+                .to.be.false;
+        });
+
+        it("Should only allow owner to set tier amounts", async function () {
+            await expect(vipManager.connect(user1).setTierAmounts(1, 2, 3))
+                .to.be.revertedWithCustomError(vipManager, "OwnableUnauthorizedAccount");
+        });
+    });
+
     describe("Hook Priority & Fallback Logic", function () {
         it("Should allow minting using rules if NO hook is configured", async function () {
             // Create a community badge with PERM_SELF to allow self-minting
@@ -158,7 +201,7 @@ describe("Society VIP Manager", function () {
             // Hardhat upgrades doesn't easily test rejection of upgrade by non-owner via high-level API
             // But we can check it via low-level call if needed or trust the onlyOwner modifier in _authorizeUpgrade
             // To properly test rejection:
-            const proxy = await ethers.getContractAt("UUPSUpgradeable", await vipManager.getAddress());
+            const proxy = (await ethers.getContractAt("UUPSUpgradeable", await vipManager.getAddress())) as any;
             const newImpl = await (await VipManagerV2.deploy()).getAddress();
 
             await expect(proxy.connect(user1).upgradeToAndCall(newImpl, "0x"))
