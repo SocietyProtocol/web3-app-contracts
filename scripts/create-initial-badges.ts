@@ -1,7 +1,7 @@
 import { ethers } from "hardhat";
 
 async function main() {
-    const BADGES_CONTRACT_ADDRESS = process.env.BADGES_CONTRACT_ADDRESS;
+    const BADGES_CONTRACT_ADDRESS = "0x76Aa1B43a651acc4320a4610af896ddfe38B428a";
 
     if (!BADGES_CONTRACT_ADDRESS) {
         throw new Error("BADGES_CONTRACT_ADDRESS environment variable is not set. Please run: BADGES_CONTRACT_ADDRESS=<ADDRESS> npx hardhat run ...");
@@ -28,6 +28,7 @@ async function main() {
                 badge.name,
                 true, // isOfficial
                 false, // isCommunity
+                ethers.ZeroAddress, // hook
                 badge.uri,
                 [], // minters
                 [], // transferers
@@ -66,6 +67,7 @@ async function main() {
             "Early Adopter",
             false, // isOfficial
             true,  // isCommunity
+            ethers.ZeroAddress, // hook
             "ipfs://early-adopter",
             [], // minters
             [], // transferers

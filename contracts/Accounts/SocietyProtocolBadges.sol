@@ -6,6 +6,10 @@ import "@openzeppelin/contracts-upgradeable/access/AccessControlUpgradeable.sol"
 import "@openzeppelin/contracts-upgradeable/token/ERC1155/extensions/ERC1155SupplyUpgradeable.sol";
 import "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
 import "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
+import "@openzeppelin/contracts-upgradeable/utils/cryptography/EIP712Upgradeable.sol";
+import "@openzeppelin/contracts/utils/cryptography/SignatureChecker.sol";
+import "@openzeppelin/contracts/utils/cryptography/MessageHashUtils.sol";
+import "@openzeppelin/contracts/utils/Strings.sol";
 import "./ISocietyBadgeHook.sol";
 
 /// @title Society Protocol Badges
@@ -16,7 +20,8 @@ contract SocietyProtocolBadges is
     ERC1155Upgradeable,
     AccessControlUpgradeable,
     ERC1155SupplyUpgradeable,
-    UUPSUpgradeable
+    UUPSUpgradeable,
+    EIP712Upgradeable
 {
     bytes32 public constant OFFICIAL_BADGE_CREATOR_ROLE =
         keccak256("OFFICIAL_BADGE_CREATOR_ROLE");
@@ -28,8 +33,14 @@ contract SocietyProtocolBadges is
     uint256 public constant PERM_EVERYONE = 2;
     uint256 public constant STARTING_BADGE_ID = 10;
 
+    bytes32 private constant INVITE_TYPEHASH =
+        keccak256("Invite(address inviter,string message)");
+
+    mapping(address => address) public invitedBy;
+
     struct BadgeInfo {
         string name;
+        address hook;
         bool isOfficial;
         bool isCommunity;
         string metadataURI;
@@ -47,16 +58,13 @@ contract SocietyProtocolBadges is
     // badgeId => editor => isAllowed
     mapping(uint256 => mapping(address => bool)) public canEdit;
 
-    // badgeId => hook address
-    mapping(uint256 => address) public badgeHooks;
-
     // user => profileBadgeId
     mapping(address => uint256) public profileBadgeId;
 
-    uint256 public nextTokenId;
-
     // badgeId => list of editors (for enumeration)
     mapping(uint256 => address[]) private _badgeEditors;
+
+    uint256 public nextTokenId;
 
     event BadgeCreated(
         uint256 indexed id,
@@ -86,6 +94,7 @@ contract SocietyProtocolBadges is
     );
     event HookUpdated(uint256 indexed id, address indexed hook);
     event ProfileCreated(address indexed user, uint256 indexed id);
+    event UserInvited(address indexed user, address indexed inviter);
 
     // Custom Errors
     error Unauthorized();
@@ -98,6 +107,9 @@ contract SocietyProtocolBadges is
     error MintNotAuthorized();
     error TransferNotAuthorized();
     error BurnNotAuthorized();
+    error AlreadyInvited();
+    error InvalidSignature();
+    error SelfInvitation();
 
     /// @custom:oz-upgrades-unsafe-allow constructor
     constructor() {
@@ -109,6 +121,7 @@ contract SocietyProtocolBadges is
         __AccessControl_init();
         __ERC1155Supply_init();
         __UUPSUpgradeable_init();
+        __EIP712_init("SocietyProtocol", "1");
 
         _grantRole(DEFAULT_ADMIN_ROLE, msg.sender);
         _grantRole(CONTRACT_UPGRADER_ROLE, msg.sender);
@@ -123,6 +136,7 @@ contract SocietyProtocolBadges is
         string memory name,
         bool isOfficial,
         bool isCommunity,
+        address hook,
         string memory metadataURI,
         uint256[] memory minters,
         uint256[] memory transferers,
@@ -144,6 +158,7 @@ contract SocietyProtocolBadges is
                 name,
                 isOfficial,
                 isCommunity,
+                hook,
                 metadataURI,
                 minters,
                 transferers,
@@ -168,6 +183,7 @@ contract SocietyProtocolBadges is
             "Profile",
             false,
             false,
+            address(0),
             metadataURI,
             empty,
             empty,
@@ -188,6 +204,7 @@ contract SocietyProtocolBadges is
         string memory name,
         bool isOfficial,
         bool isCommunity,
+        address hook,
         string memory metadataURI,
         uint256[] memory minters,
         uint256[] memory transferers,
@@ -199,10 +216,15 @@ contract SocietyProtocolBadges is
 
         badges[id] = BadgeInfo({
             name: name,
+            hook: hook,
             isOfficial: isOfficial,
             isCommunity: isCommunity,
             metadataURI: metadataURI
         });
+
+        if (hook != address(0)) {
+            emit HookUpdated(id, hook);
+        }
 
         canMint[id] = minters;
         canTransfer[id] = transferers;
@@ -224,7 +246,7 @@ contract SocietyProtocolBadges is
     /// @dev Only callable by GOVERNOR_ROLE
     function setBadgeHook(uint256 id, address hook) external {
         if (!canEdit[id][msg.sender]) revert Unauthorized();
-        badgeHooks[id] = hook;
+        badges[id].hook = hook;
         emit HookUpdated(id, hook);
     }
 
@@ -243,6 +265,18 @@ contract SocietyProtocolBadges is
         if (!canEdit[id][msg.sender]) revert Unauthorized();
 
         BadgeInfo storage badge = badges[id];
+
+        // Check for official badge status toggling
+        // Only OFFICIAL_BADGE_CREATOR_ROLE can change isOfficial status (promotion or demotion)
+        if (isOfficial != badge.isOfficial) {
+            if (!hasRole(OFFICIAL_BADGE_CREATOR_ROLE, msg.sender)) {
+                revert AccessControlUnauthorizedAccount(
+                    msg.sender,
+                    OFFICIAL_BADGE_CREATOR_ROLE
+                );
+            }
+        }
+
         badge.name = name;
         badge.isOfficial = isOfficial;
         badge.isCommunity = isCommunity;
@@ -261,6 +295,108 @@ contract SocietyProtocolBadges is
         if (id > nextTokenId) revert BadgeDoesNotExist();
         // Permission check is done in _update
         _mint(to, id, amount, data);
+    }
+
+    /**
+     * @notice Mints multiple badges to a single recipient
+     * @param to The recipient address
+     * @param ids Array of badge IDs to mint
+     * @param amounts Array of amounts for each badge ID
+     * @param data Additional data for the minting operation
+     */
+    function mintBatch(
+        address to,
+        uint256[] memory ids,
+        uint256[] memory amounts,
+        bytes memory data
+    ) public {
+        for (uint256 i = 0; i < ids.length; i++) {
+            if (ids[i] > nextTokenId) revert BadgeDoesNotExist();
+        }
+        // Permission check is done in _update
+        _mintBatch(to, ids, amounts, data);
+    }
+
+    /**
+     * @notice Overrides standard safeTransferFrom to allow transfers based on badge permissions
+     * @dev Bypasses standard isApprovedForAll check. Security is enforced in _update hook.
+     */
+    function safeTransferFrom(
+        address from,
+        address to,
+        uint256 id,
+        uint256 value,
+        bytes memory data
+    ) public override {
+        // We skip the standard approval check since we want our badge-based
+        // permissions in _update to be the sole authority.
+        _safeTransferFrom(from, to, id, value, data);
+    }
+
+    /**
+     * @notice Overrides standard safeBatchTransferFrom to allow transfers based on badge permissions
+     * @dev Bypasses standard isApprovedForAll check. Security is enforced in _update hook.
+     */
+    function safeBatchTransferFrom(
+        address from,
+        address to,
+        uint256[] memory ids,
+        uint256[] memory values,
+        bytes memory data
+    ) public override {
+        // We skip the standard approval check since we want our badge-based
+        // permissions in _update to be the sole authority.
+        _safeBatchTransferFrom(from, to, ids, values, data);
+    }
+
+    /**
+     * @notice Burns tokens from a specified address
+     * @dev Bypasses standard isApprovedForAll check. Security is enforced in _update hook.
+     * @param from The address to burn from
+     * @param id The badge ID to burn
+     * @param value The amount to burn
+     */
+    function burn(address from, uint256 id, uint256 value) public {
+        if (id > nextTokenId) revert BadgeDoesNotExist();
+        _burn(from, id, value);
+    }
+
+    /**
+     * @notice Burns multiple badges from a specified address
+     * @dev Bypasses standard isApprovedForAll check. Security is enforced in _update hook.
+     * @param from The address to burn from
+     * @param ids Array of badge IDs to burn
+     * @param values Array of amounts to burn for each badge ID
+     */
+    function burnBatch(
+        address from,
+        uint256[] memory ids,
+        uint256[] memory values
+    ) public {
+        for (uint256 i = 0; i < ids.length; i++) {
+            if (ids[i] > nextTokenId) revert BadgeDoesNotExist();
+        }
+        _burnBatch(from, ids, values);
+    }
+
+    /**
+     * @notice Mints a single badge to multiple recipients
+     * @param to Array of recipient addresses
+     * @param id The badge ID to mint
+     * @param amount The amount to mint for each recipient
+     * @param data Additional data for the minting operation
+     */
+    function mintToMultiple(
+        address[] memory to,
+        uint256 id,
+        uint256 amount,
+        bytes memory data
+    ) public {
+        if (id > nextTokenId) revert BadgeDoesNotExist();
+        for (uint256 i = 0; i < to.length; i++) {
+            // Permission check is done in _update for each mint
+            _mint(to[i], id, amount, data);
+        }
     }
 
     /// @notice Updates the metadata URI for a badge
@@ -286,6 +422,28 @@ contract SocietyProtocolBadges is
         return badges[id].metadataURI;
     }
 
+    function balanceOf(
+        address account,
+        uint256 id
+    ) public view override returns (uint256) {
+        address hook = badges[id].hook;
+        if (hook != address(0)) {
+            return ISocietyBadgeHook(hook).onBalanceOf(account, id);
+        }
+        return super.balanceOf(account, id);
+    }
+
+    function balanceOfBatch(
+        address[] memory accounts,
+        uint256[] memory ids
+    ) public view override returns (uint256[] memory) {
+        uint256[] memory batchBalances = new uint256[](accounts.length);
+        for (uint256 i = 0; i < accounts.length; ++i) {
+            batchBalances[i] = balanceOf(accounts[i], ids[i]);
+        }
+        return batchBalances;
+    }
+
     /// @notice Returns the list of badges required to mint the given badgeId
     function getBadgeMinters(
         uint256 id
@@ -298,6 +456,61 @@ contract SocietyProtocolBadges is
         uint256 id
     ) external view returns (uint256[] memory) {
         return canTransfer[id];
+    }
+
+    /**
+     * @notice Accepts an invitation from another user
+     * @param inviter The address that issued the invite
+     * @param message The message that was signed
+     * @param signature The EIP-712 signature from the inviter
+     */
+    function acceptInvite(
+        address inviter,
+        string calldata message,
+        bytes calldata signature
+    ) external {
+        if (invitedBy[msg.sender] != address(0)) revert AlreadyInvited();
+        if (inviter == msg.sender) revert SelfInvitation();
+
+        bytes memory msgBytes = bytes(message);
+        uint256 len = msgBytes.length;
+        if (len < 42) revert InvalidSignature();
+
+        bytes memory addressBytes = new bytes(42);
+        for (uint256 i = 0; i < 42; i++) {
+            addressBytes[i] = msgBytes[len - 42 + i];
+        }
+
+        if (
+            keccak256(addressBytes) !=
+            keccak256(bytes(Strings.toHexString(msg.sender)))
+        ) {
+            revert InvalidSignature();
+        }
+
+        bytes32 structHash = keccak256(
+            abi.encode(INVITE_TYPEHASH, inviter, keccak256(bytes(message)))
+        );
+        bytes32 hash = _hashTypedDataV4(structHash);
+
+        if (!SignatureChecker.isValidSignatureNow(inviter, hash, signature)) {
+            // Try matching against EthSignedMessageHash (personal_sign)
+            bytes32 ethSignedHash = MessageHashUtils.toEthSignedMessageHash(
+                bytes(message)
+            );
+            if (
+                !SignatureChecker.isValidSignatureNow(
+                    inviter,
+                    ethSignedHash,
+                    signature
+                )
+            ) {
+                revert InvalidSignature();
+            }
+        }
+
+        invitedBy[msg.sender] = inviter;
+        emit UserInvited(msg.sender, inviter);
     }
 
     /// @notice Returns the list of badges required to burn the given badgeId
@@ -322,7 +535,7 @@ contract SocietyProtocolBadges is
     ) internal override(ERC1155Upgradeable, ERC1155SupplyUpgradeable) {
         for (uint256 i = 0; i < ids.length; i++) {
             uint256 id = ids[i];
-            address hook = badgeHooks[id];
+            address hook = badges[id].hook;
 
             if (hook != address(0)) {
                 // Hook has priority

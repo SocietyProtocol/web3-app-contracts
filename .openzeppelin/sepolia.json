@@ -2,73 +2,87 @@
   "manifestVersion": "3.2",
   "proxies": [
     {
-      "address": "0x21d798f885609b228D05a75f8bD9a4De538fbf11",
-      "txHash": "0xc3fc3d7d024ee0b451a8f6a96729d4c69f69a4dfc7ebb501ddab59aa989a155e",
+      "address": "0x76Aa1B43a651acc4320a4610af896ddfe38B428a",
       "kind": "uups"
     }
   ],
   "impls": {
-    "2fc1b26727351855c66ad5745a17beedc8522125d7d1cd78af640a5ba5c27996": {
-      "address": "0xe00f7754B1DbfD1904632997b2E8d576429DD9E4",
-      "txHash": "0x2f6cc31289393cfeb454cd6bf38cd797dc3a812ab9d98abf02919db17495dd16",
+    "aae002459927aba33cf01b65072f883bf314597feaa61876dbd441fb74acc3d5": {
+      "address": "0x452b7620AD41E7c70feFc1969847B205F133A92D",
       "layout": {
         "solcVersion": "0.8.28",
         "storage": [
           {
-            "label": "badges",
+            "label": "invitedBy",
             "offset": 0,
             "slot": "0",
-            "type": "t_mapping(t_uint256,t_struct(BadgeInfo)8751_storage)",
+            "type": "t_mapping(t_address,t_address)",
             "contract": "SocietyProtocolBadges",
-            "src": "contracts/Accounts/SocietyProtocolBadges.sol:30"
+            "src": "contracts/Accounts/SocietyProtocolBadges.sol:39"
+          },
+          {
+            "label": "badges",
+            "offset": 0,
+            "slot": "1",
+            "type": "t_mapping(t_uint256,t_struct(BadgeInfo)12454_storage)",
+            "contract": "SocietyProtocolBadges",
+            "src": "contracts/Accounts/SocietyProtocolBadges.sol:49"
           },
           {
             "label": "canMint",
             "offset": 0,
-            "slot": "1",
-            "type": "t_mapping(t_uint256,t_mapping(t_address,t_bool))",
+            "slot": "2",
+            "type": "t_mapping(t_uint256,t_array(t_uint256)dyn_storage)",
             "contract": "SocietyProtocolBadges",
-            "src": "contracts/Accounts/SocietyProtocolBadges.sol:33"
+            "src": "contracts/Accounts/SocietyProtocolBadges.sol:52"
           },
           {
             "label": "canTransfer",
             "offset": 0,
-            "slot": "2",
-            "type": "t_mapping(t_uint256,t_mapping(t_address,t_bool))",
+            "slot": "3",
+            "type": "t_mapping(t_uint256,t_array(t_uint256)dyn_storage)",
             "contract": "SocietyProtocolBadges",
-            "src": "contracts/Accounts/SocietyProtocolBadges.sol:34"
+            "src": "contracts/Accounts/SocietyProtocolBadges.sol:54"
           },
           {
             "label": "canBurn",
             "offset": 0,
-            "slot": "3",
-            "type": "t_mapping(t_uint256,t_mapping(t_address,t_bool))",
-            "contract": "SocietyProtocolBadges",
-            "src": "contracts/Accounts/SocietyProtocolBadges.sol:35"
-          },
-          {
-            "label": "badgeHooks",
-            "offset": 0,
             "slot": "4",
-            "type": "t_mapping(t_uint256,t_address)",
+            "type": "t_mapping(t_uint256,t_array(t_uint256)dyn_storage)",
             "contract": "SocietyProtocolBadges",
-            "src": "contracts/Accounts/SocietyProtocolBadges.sol:38"
+            "src": "contracts/Accounts/SocietyProtocolBadges.sol:56"
           },
           {
-            "label": "userProfileId",
+            "label": "canEdit",
             "offset": 0,
             "slot": "5",
+            "type": "t_mapping(t_uint256,t_mapping(t_address,t_bool))",
+            "contract": "SocietyProtocolBadges",
+            "src": "contracts/Accounts/SocietyProtocolBadges.sol:59"
+          },
+          {
+            "label": "profileBadgeId",
+            "offset": 0,
+            "slot": "6",
             "type": "t_mapping(t_address,t_uint256)",
             "contract": "SocietyProtocolBadges",
-            "src": "contracts/Accounts/SocietyProtocolBadges.sol:41"
+            "src": "contracts/Accounts/SocietyProtocolBadges.sol:62"
+          },
+          {
+            "label": "_badgeEditors",
+            "offset": 0,
+            "slot": "7",
+            "type": "t_mapping(t_uint256,t_array(t_address)dyn_storage)",
+            "contract": "SocietyProtocolBadges",
+            "src": "contracts/Accounts/SocietyProtocolBadges.sol:65"
           },
           {
             "label": "nextTokenId",
             "offset": 0,
-            "slot": "6",
+            "slot": "8",
             "type": "t_uint256",
             "contract": "SocietyProtocolBadges",
-            "src": "contracts/Accounts/SocietyProtocolBadges.sol:43"
+            "src": "contracts/Accounts/SocietyProtocolBadges.sol:67"
           }
         ],
         "types": {
@@ -124,7 +138,37 @@
             ],
             "numberOfBytes": "32"
           },
-          "t_struct(ERC1155Storage)308_storage": {
+          "t_struct(EIP712Storage)734_storage": {
+            "label": "struct EIP712Upgradeable.EIP712Storage",
+            "members": [
+              {
+                "label": "_hashedName",
+                "type": "t_bytes32",
+                "offset": 0,
+                "slot": "0"
+              },
+              {
+                "label": "_hashedVersion",
+                "type": "t_bytes32",
+                "offset": 0,
+                "slot": "1"
+              },
+              {
+                "label": "_name",
+                "type": "t_string_storage",
+                "offset": 0,
+                "slot": "2"
+              },
+              {
+                "label": "_version",
+                "type": "t_string_storage",
+                "offset": 0,
+                "slot": "3"
+              }
+            ],
+            "numberOfBytes": "128"
+          },
+          "t_struct(ERC1155Storage)374_storage": {
             "label": "struct ERC1155Upgradeable.ERC1155Storage",
             "members": [
               {
@@ -148,7 +192,7 @@
             ],
             "numberOfBytes": "96"
           },
-          "t_struct(ERC1155SupplyStorage)561_storage": {
+          "t_struct(ERC1155SupplyStorage)627_storage": {
             "label": "struct ERC1155SupplyUpgradeable.ERC1155SupplyStorage",
             "members": [
               {
@@ -166,7 +210,7 @@
             ],
             "numberOfBytes": "64"
           },
-          "t_struct(InitializableStorage)147_storage": {
+          "t_struct(InitializableStorage)213_storage": {
             "label": "struct Initializable.InitializableStorage",
             "members": [
               {
@@ -210,19 +254,35 @@
             "label": "uint64",
             "numberOfBytes": "8"
           },
-          "t_mapping(t_uint256,t_address)": {
-            "label": "mapping(uint256 => address)",
+          "t_array(t_address)dyn_storage": {
+            "label": "address[]",
+            "numberOfBytes": "32"
+          },
+          "t_array(t_uint256)dyn_storage": {
+            "label": "uint256[]",
+            "numberOfBytes": "32"
+          },
+          "t_mapping(t_address,t_address)": {
+            "label": "mapping(address => address)",
+            "numberOfBytes": "32"
+          },
+          "t_mapping(t_uint256,t_array(t_address)dyn_storage)": {
+            "label": "mapping(uint256 => address[])",
+            "numberOfBytes": "32"
+          },
+          "t_mapping(t_uint256,t_array(t_uint256)dyn_storage)": {
+            "label": "mapping(uint256 => uint256[])",
             "numberOfBytes": "32"
           },
           "t_mapping(t_uint256,t_mapping(t_address,t_bool))": {
             "label": "mapping(uint256 => mapping(address => bool))",
             "numberOfBytes": "32"
           },
-          "t_mapping(t_uint256,t_struct(BadgeInfo)8751_storage)": {
+          "t_mapping(t_uint256,t_struct(BadgeInfo)12454_storage)": {
             "label": "mapping(uint256 => struct SocietyProtocolBadges.BadgeInfo)",
             "numberOfBytes": "32"
           },
-          "t_struct(BadgeInfo)8751_storage": {
+          "t_struct(BadgeInfo)12454_storage": {
             "label": "struct SocietyProtocolBadges.BadgeInfo",
             "members": [
               {
@@ -232,9 +292,21 @@
                 "slot": "0"
               },
               {
+                "label": "hook",
+                "type": "t_address",
+                "offset": 0,
+                "slot": "1"
+              },
+              {
                 "label": "isOfficial",
                 "type": "t_bool",
-                "offset": 0,
+                "offset": 20,
+                "slot": "1"
+              },
+              {
+                "label": "isCommunity",
+                "type": "t_bool",
+                "offset": 21,
                 "slot": "1"
               },
               {
@@ -248,6 +320,40 @@
           }
         },
         "namespaces": {
+          "erc7201:openzeppelin.storage.EIP712": [
+            {
+              "contract": "EIP712Upgradeable",
+              "label": "_hashedName",
+              "type": "t_bytes32",
+              "src": "@openzeppelin/contracts-upgradeable/utils/cryptography/EIP712Upgradeable.sol:38",
+              "offset": 0,
+              "slot": "0"
+            },
+            {
+              "contract": "EIP712Upgradeable",
+              "label": "_hashedVersion",
+              "type": "t_bytes32",
+              "src": "@openzeppelin/contracts-upgradeable/utils/cryptography/EIP712Upgradeable.sol:40",
+              "offset": 0,
+              "slot": "1"
+            },
+            {
+              "contract": "EIP712Upgradeable",
+              "label": "_name",
+              "type": "t_string_storage",
+              "src": "@openzeppelin/contracts-upgradeable/utils/cryptography/EIP712Upgradeable.sol:42",
+              "offset": 0,
+              "slot": "2"
+            },
+            {
+              "contract": "EIP712Upgradeable",
+              "label": "_version",
+              "type": "t_string_storage",
+              "src": "@openzeppelin/contracts-upgradeable/utils/cryptography/EIP712Upgradeable.sol:43",
+              "offset": 0,
+              "slot": "3"
+            }
+          ],
           "erc7201:openzeppelin.storage.ERC1155Supply": [
             {
               "contract": "ERC1155SupplyUpgradeable",
@@ -321,7 +427,16 @@
             }
           ]
         }
-      }
+      },
+      "allAddresses": [
+        "0x452b7620AD41E7c70feFc1969847B205F133A92D",
+        "0x288A4C1C717d03742680D75CEE3C2344c0Fc35cd",
+        "0xbb4c8d116120b572E47ABB72a11716627fC91686",
+        "0xDC7Fd461DC2db68ed02489e878850a0aCE34e07B",
+        "0x7a225238504970b579363D7572b987aA00EbCd00",
+        "0x5D7f04a8aAC9D5176082bbfaBdD7b40d7B1456C7",
+        "0x957F935F495769358D67692205158E3CD3C24517"
+      ]
     }
   }
 }
