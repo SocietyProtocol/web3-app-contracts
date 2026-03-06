@@ -110,6 +110,7 @@ contract SocietyProtocolBadges is
     error AlreadyInvited();
     error InvalidSignature();
     error SelfInvitation();
+    error CircularInvitation();
 
     /// @custom:oz-upgrades-unsafe-allow constructor
     constructor() {
@@ -471,6 +472,7 @@ contract SocietyProtocolBadges is
     ) external {
         if (invitedBy[msg.sender] != address(0)) revert AlreadyInvited();
         if (inviter == msg.sender) revert SelfInvitation();
+        if (invitedBy[inviter] == msg.sender) revert CircularInvitation();
 
         bytes memory msgBytes = bytes(message);
         uint256 len = msgBytes.length;
