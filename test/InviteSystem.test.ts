@@ -163,15 +163,26 @@ describe("Society Protocol Badges - Invite System", function () {
         ).to.be.revertedWithCustomError(badges, "SelfInvitation");
     });
 
-    it("User's frontend uses signMessage (Should Fail currently, but goal is to make it Pass)", async function () {
+    it("User's frontend uses signMessage", async function () {
         const message = `Sign this message to generate a referral code for the address: ${guest.address.toLowerCase()}`;
 
         // Frontend uses signMessage (Personal Sign) -> produce EthSignedMessageHash
         const signature = await owner.signMessage(message);
 
         // Verify
-        // This should now PASS with the contract fix
         await badges.connect(guest).acceptInvite(owner.address, message, signature);
         expect(await badges.invitedBy(guest.address)).to.equal(owner.address);
+    });
+
+    it("Should reject circular invitation", async function () {
+        // Step 1: inviter invites guest
+        const invite1 = await getInviteSignature(inviter, inviter.address, guest.address);
+        await badges.connect(guest).acceptInvite(inviter.address, invite1.message, invite1.signature);
+
+        // Step 2: guest invites inviter (circular)
+        const invite2 = await getInviteSignature(guest, guest.address, inviter.address);
+        await expect(
+            badges.connect(inviter).acceptInvite(guest.address, invite2.message, invite2.signature)
+        ).to.be.revertedWithCustomError(badges, "CircularInvitation");
     });
 });
