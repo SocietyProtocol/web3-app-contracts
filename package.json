@@ -10,9 +10,11 @@
     "build": "hardhat compile",
     "clean": "hardhat clean",
     "test": "hardhat test",
-    "deploy": "hardhat run --network localhost scripts/deploy.ts"
+    "deploy": "hardhat run --network localhost scripts/deploy.ts",
+    "deploy:all": "hardhat run scripts/deploy-all.ts"
   },
   "devDependencies": {
+    "@nomicfoundation/hardhat-ethers": "^3.1.3",
     "@nomicfoundation/hardhat-toolbox": "^4.0.0",
     "@openzeppelin/hardhat-upgrades": "^3.9.1",
     "dotenv": "^16.4.5",
