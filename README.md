@@ -87,7 +87,7 @@ FACTORY_PROXY_ADDRESS=0x... npx hardhat run scripts/upgrade-community-factory.ts
 
 | Contract | Address |
 |---|---|
-| SPECToken | `0x21dC59C8D7a333408C6ad5f6b5a17C7161E3D6dd` |
+| SPEC | `0x21dC59C8D7a333408C6ad5f6b5a17C7161E3D6dd` |
 | SocietyProtocolBadges (proxy) | `0xa3AF0DA9733061Da88b91Ea28740780A887c8ce3` |
 | SocietyProtocolBadges (impl) | `0x12D5c1461C7cb4A84Ba5db20741078a7094Fa7f9` |
 | CommunityWrapper (impl) | `0xb89eee9b1eC855cB4b1B73D1B695C1A46e09228e` |

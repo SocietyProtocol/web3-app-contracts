@@ -62,13 +62,13 @@ async function verifyPlain(
 
 // ─── Deployment Steps ─────────────────────────────────────────────────────────
 
-async function deploySPECToken(): Promise<{ contract: any; address: string }> {
-    console.log("\n[SPECToken] Deploying SPEC token...");
-    const Token = await ethers.getContractFactory("SPECToken");
+async function deploySPEC(): Promise<{ contract: any; address: string }> {
+    console.log("\n[SPEC] Deploying SPEC token...");
+    const Token = await ethers.getContractFactory("SPEC");
     const contract = await Token.deploy();
     await contract.waitForDeployment();
     const address = await contract.getAddress();
-    console.log(`[SPECToken] Deployed to: ${address}`);
+    console.log(`[SPEC] Deployed to: ${address}`);
     return { contract, address };
 }
 
@@ -121,7 +121,7 @@ function printSummary(result: DeploymentResult): void {
 
     const rows: [string, string][] = [
         ["Network",                         network.name],
-        ["SPECToken",                       result.specToken],
+        ["SPEC",                       result.specToken],
         ["SocietyProtocolBadges (proxy)",   result.badgesProxy],
         ["SocietyProtocolBadges (impl)",    result.badgesImpl],
         ["CommunityWrapper (impl)",         result.wrapperImpl],
@@ -146,7 +146,7 @@ async function main(): Promise<void> {
     const live = isLiveNetwork();
 
     // Step 1: Deploy SPEC token
-    const specToken = await deploySPECToken();
+    const specToken = await deploySPEC();
 
     // Step 2: Deploy SocietyProtocolBadges
     const badges = await deployBadges();
@@ -170,7 +170,7 @@ async function main(): Promise<void> {
     if (live) {
         console.log("\n[Verify] Starting contract verification...");
 
-        await verifyPlain("[SPECToken]", specToken.contract, []);
+        await verifyPlain("[SPEC]", specToken.contract, []);
         result.badgesImpl = await verifyProxy("[SocietyProtocolBadges]", badges.contract);
         await verifyPlain("[CommunityWrapper]", wrapperImpl.contract, []);
         result.factoryImpl = await verifyProxy("[CommunityWrapperFactory]", factory.contract);

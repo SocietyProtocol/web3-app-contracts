@@ -1,12 +1,12 @@
 import { expect } from "chai";
 import { ethers, upgrades } from "hardhat";
-import { SocietyProtocolBadges, SocietyVipManager, SPECToken } from "../typechain-types";
+import { SocietyProtocolBadges, SocietyVipManager, SPEC } from "../typechain-types";
 import { time } from "@nomicfoundation/hardhat-network-helpers";
 
 describe("Society VIP Manager", function () {
     let badges: SocietyProtocolBadges;
     let vipManager: SocietyVipManager;
-    let stakingToken: SPECToken;
+    let stakingToken: SPEC;
     let owner: any;
     let user1: any;
 
@@ -24,8 +24,8 @@ describe("Society VIP Manager", function () {
         await badges.waitForDeployment();
 
         // 2. Deploy Staking Token
-        const Token = await ethers.getContractFactory("SPECToken");
-        stakingToken = (await Token.deploy()) as unknown as SPECToken;
+        const Token = await ethers.getContractFactory("SPEC");
+        stakingToken = (await Token.deploy()) as unknown as SPEC;
         await stakingToken.waitForDeployment();
 
         // 3. Deploy VIP Manager via Proxy
