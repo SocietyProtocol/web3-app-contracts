@@ -83,5 +83,18 @@ VIP_MANAGER_PROXY_ADDRESS=0x... npx hardhat run scripts/upgrade-vip-manager.ts -
 FACTORY_PROXY_ADDRESS=0x... npx hardhat run scripts/upgrade-community-factory.ts --network <network>
 ```
 
+## Deployed Contracts (Mainnet)
+
+| Contract | Address |
+|---|---|
+| SPECToken | `0x21dC59C8D7a333408C6ad5f6b5a17C7161E3D6dd` |
+| SocietyProtocolBadges (proxy) | `0xa3AF0DA9733061Da88b91Ea28740780A887c8ce3` |
+| SocietyProtocolBadges (impl) | `0x12D5c1461C7cb4A84Ba5db20741078a7094Fa7f9` |
+| CommunityWrapper (impl) | `0xb89eee9b1eC855cB4b1B73D1B695C1A46e09228e` |
+| CommunityWrapperFactory (proxy) | `0x22c9FA55a339083a3Dfb2fb9d266E08637e3196e` |
+| CommunityWrapperFactory (impl) | `0x7a338d82988f13bb8c1bd61bC8F7f27A1eA370b9` |
+| SocietyVipManager (proxy) | `0x91715d95004Bd57eDC1E0FD718688CEd475E130A` |
+| SocietyVipManager (impl) | `0xa774D9b7BCBFE319477bE3767Bd84Bb20e4517f6` |
+
 ## License
 MIT
