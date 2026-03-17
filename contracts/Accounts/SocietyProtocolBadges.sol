@@ -132,7 +132,7 @@ contract SocietyProtocolBadges is
     }
 
     /// @notice Creates a new badge
-    /// @dev Consolidated function for official and community badges
+    /// @dev Open to anyone; official badges additionally require OFFICIAL_BADGE_CREATOR_ROLE
     function createBadge(
         string memory name,
         bool isOfficial,
@@ -244,7 +244,7 @@ contract SocietyProtocolBadges is
     }
 
     /// @notice Sets a hook contract for a specific badge
-    /// @dev Only callable by GOVERNOR_ROLE
+    /// @dev Only callable by badge editors (canEdit[id][msg.sender])
     function setBadgeHook(uint256 id, address hook) external {
         if (!canEdit[id][msg.sender]) revert Unauthorized();
         badges[id].hook = hook;
@@ -252,7 +252,7 @@ contract SocietyProtocolBadges is
     }
 
     /// @notice Modifies an existing badge
-    /// @dev Only callable by Governor or Badge Creator
+    /// @dev Callable by badge editors; toggling isOfficial additionally requires OFFICIAL_BADGE_CREATOR_ROLE
     function modifyBadge(
         uint256 id,
         string memory name,
