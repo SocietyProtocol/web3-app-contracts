@@ -1,5 +1,7 @@
 import { ethers } from "hardhat";
 
+const PERM_SELF = 1n;
+
 async function main() {
     const BADGES_CONTRACT_ADDRESS = process.env.BADGES_CONTRACT_ADDRESS;
 
@@ -10,77 +12,135 @@ async function main() {
     const [deployer] = await ethers.getSigners();
     console.log("Interacting with contracts with account:", deployer.address);
 
-    const SocietyProtocolBadges = await ethers.getContractAt("SocietyProtocolBadges", BADGES_CONTRACT_ADDRESS);
+    const badges = await ethers.getContractAt("SocietyProtocolBadges", BADGES_CONTRACT_ADDRESS);
 
-    // 1. Create 3 Official Badges
-    // Only OFFICIAL_BADGE_CREATOR_ROLE can create official badges. Deployer has it.
+    // Compute the Governor badge ID before creation
+    const nextTokenId = await badges.nextTokenId();
+    const governorId = nextTokenId + 1n;
 
-    const officialBadges = [
-        { name: "Society Member", uri: "ipfs://member" },
-        { name: "Society Officer", uri: "ipfs://officer" },
-        { name: "Society Leader", uri: "ipfs://leader" }
-    ];
+    console.log(`\nNext token ID: ${nextTokenId}, Governor badge will be ID: ${governorId}`);
 
-    console.log("\nCreating Official Badges...");
-    for (const badge of officialBadges) {
-        try {
-            const tx = await SocietyProtocolBadges.createBadge(
-                badge.name,
-                true, // isOfficial
-                false, // isCommunity
-                ethers.ZeroAddress, // hook
-                badge.uri,
-                [], // minters
-                [], // transferers
-                [],  // burners
-                [deployer.address] // editors - assigning deployer as editor for now
-            );
-            await tx.wait();
-            console.log(`- Created Official Badge: ${badge.name}`);
-        } catch (error) {
-            console.error(`Failed to create badge ${badge.name}:`, error);
-        }
-    }
+    // =========================================================================
+    // 1. Governor Badge
+    // =========================================================================
+    // Bootstrap: uses PERM_SELF so deployer can mint to themselves.
+    // A hook should be set afterward to restrict minting to governor holders only,
+    // since the hook overrides the permission arrays entirely.
+    console.log("\n1. Creating Governor badge...");
+    const governorTx = await badges.createBadge(
+        "Governor",
+        true,             // isOfficial
+        false,            // isCommunity
+        ethers.ZeroAddress, // hook (set later for proper access control)
+        "",               // metadataURI
+        [PERM_SELF, governorId], // minters - PERM_SELF for bootstrap, governorId so governors can appoint others
+        [],               // transferers - non-transferable
+        [governorId],     // burners - governors can revoke
+        [deployer.address] // editors
+    );
+    await governorTx.wait();
+    console.log(`   Created Governor badge (ID: ${governorId})`);
 
-    // 2. Create 1 Profile Badge
-    console.log("\nCreating Profile Badge...");
-    try {
-        const profileTx = await SocietyProtocolBadges.createProfile("ipfs://my-profile");
-        await profileTx.wait();
-        console.log("- Created Profile Badge for deployer");
-    } catch (error: any) {
-        if (error.message.includes("ProfileAlreadyExists")) {
-            console.log("- Profile already exists for this user.");
-        } else {
-            console.error("Failed to create profile:", error);
-        }
-    }
+    // Mint Governor badge to deployer
+    console.log("   Minting Governor badge to deployer...");
+    const mintGovTx = await badges.mint(deployer.address, governorId, 1, "0x");
+    await mintGovTx.wait();
+    console.log("   Deployer now holds Governor badge");
 
-    // 3. Create 1 Community Badge
-    // Only MINTER_ROLE (now implicitly handled or anyone can create if logic allows, but usually we want specific roles for official)
-    // Actually per contract: "Anyone can create a badge" (lines 131-133 of SocietyProtocolBadges.sol)
-    // But let's keep the flow.
+    // =========================================================================
+    // 2. Social Proof Individual
+    // =========================================================================
+    // Governors verify and grant. Self can renounce, governors can revoke.
+    console.log("\n2. Creating Social Proof Individual badge...");
+    const spiTx = await badges.createBadge(
+        "Social Proof Individual",
+        true,             // isOfficial
+        false,            // isCommunity
+        ethers.ZeroAddress,
+        "",               // metadataURI
+        [governorId],     // minters - governors grant
+        [],               // transferers - non-transferable
+        [PERM_SELF, governorId], // burners - self or governors
+        [deployer.address]
+    );
+    await spiTx.wait();
+    const spiId = governorId + 1n;
+    console.log(`   Created Social Proof Individual badge (ID: ${spiId})`);
 
-    console.log("\nCreating Community Badge...");
-    try {
-        const communityTx = await SocietyProtocolBadges.createBadge(
-            "Early Adopter",
-            false, // isOfficial
-            true,  // isCommunity
-            ethers.ZeroAddress, // hook
-            "ipfs://early-adopter",
-            [], // minters
-            [], // transferers
-            [],  // burners
-            [deployer.address] // editors
-        );
-        await communityTx.wait();
-        console.log("- Created Community Badge: Early Adopter");
-    } catch (error) {
-        console.error("Failed to create community badge:", error);
-    }
+    // =========================================================================
+    // 3. Liquidity Provider
+    // =========================================================================
+    // Governors grant. Self can renounce, governors can revoke.
+    console.log("\n3. Creating Liquidity Provider badge...");
+    const lpTx = await badges.createBadge(
+        "Liquidity Provider",
+        true,             // isOfficial
+        false,            // isCommunity
+        ethers.ZeroAddress,
+        "",               // metadataURI
+        [governorId],     // minters - governors grant
+        [],               // transferers - non-transferable
+        [PERM_SELF, governorId], // burners - self or governors
+        [deployer.address]
+    );
+    await lpTx.wait();
+    const lpId = governorId + 2n;
+    console.log(`   Created Liquidity Provider badge (ID: ${lpId})`);
 
-    console.log("\nDone!");
+    // =========================================================================
+    // 4. ICO Participant
+    // =========================================================================
+    // Governors grant and revoke. Non-transferable, non-self-burnable
+    // (represents a verifiable fact).
+    console.log("\n4. Creating ICO Participant badge...");
+    const icoTx = await badges.createBadge(
+        "ICO Participant",
+        true,             // isOfficial
+        false,            // isCommunity
+        ethers.ZeroAddress,
+        "",               // metadataURI
+        [governorId],     // minters - governors grant
+        [],               // transferers - non-transferable
+        [governorId],     // burners - governors only
+        [deployer.address]
+    );
+    await icoTx.wait();
+    const icoId = governorId + 3n;
+    console.log(`   Created ICO Participant badge (ID: ${icoId})`);
+
+    // =========================================================================
+    // 5. Society Protocol Team Member
+    // =========================================================================
+    // Governors grant and revoke. Non-transferable, non-self-burnable
+    // (team membership is an org decision).
+    console.log("\n5. Creating Society Protocol Team Member badge...");
+    const teamTx = await badges.createBadge(
+        "Society Protocol Team Member",
+        true,             // isOfficial
+        false,            // isCommunity
+        ethers.ZeroAddress,
+        "",               // metadataURI
+        [governorId],     // minters - governors grant
+        [],               // transferers - non-transferable
+        [governorId],     // burners - governors only
+        [deployer.address]
+    );
+    await teamTx.wait();
+    const teamId = governorId + 4n;
+    console.log(`   Created Society Protocol Team Member badge (ID: ${teamId})`);
+
+    // =========================================================================
+    // Summary
+    // =========================================================================
+    console.log("\n========== Badge Setup Complete ==========");
+    console.log(`Governor:                     ID ${governorId}`);
+    console.log(`Social Proof Individual:      ID ${spiId}`);
+    console.log(`Liquidity Provider:           ID ${lpId}`);
+    console.log(`ICO Participant:              ID ${icoId}`);
+    console.log(`Society Protocol Team Member: ID ${teamId}`);
+    console.log("\nNOTE: Governor badge uses PERM_SELF for minting (bootstrap).");
+    console.log("Set a hook on the Governor badge to enforce governor-only minting.");
+    console.log("==========================================\n");
 }
 
 main().catch((error) => {

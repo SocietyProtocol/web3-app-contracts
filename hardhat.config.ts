@@ -31,6 +31,7 @@ const config: HardhatUserConfig = {
     mainnet: {
       url: MAINNET_RPC_URL,
       accounts: PRIVATE_KEY ? [PRIVATE_KEY] : [],
+      gas: 30_000_000,
     },
   },
   etherscan: {
