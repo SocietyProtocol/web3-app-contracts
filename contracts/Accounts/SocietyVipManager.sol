@@ -7,8 +7,12 @@ import "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
 import "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
 import "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
 import "./ISocietyBadgeHook.sol";
-import "./SocietyProtocolBadges.sol";
 
+/**
+ * @title Society VIP Manager
+ * @notice Manages VIP tiers (Bronze, Silver, Gold) via staking.
+ * @dev Implements ISocietyBadgeHook to provide dynamic ownership of VIP badges based on locked amounts.
+ */
 contract SocietyVipManager is
     Initializable,
     OwnableUpgradeable,
@@ -17,39 +21,71 @@ contract SocietyVipManager is
 {
     using SafeERC20 for IERC20;
 
+    /// @notice The ERC20 token used for staking.
     IERC20 public stakingToken;
-    SocietyProtocolBadges public badgesContract;
-    uint256 public governorBadgeId;
 
+    /// @notice Badge ID for the Bronze VIP tier.
     uint256 public bronzeBadgeId;
+    /// @notice Badge ID for the Silver VIP tier.
     uint256 public silverBadgeId;
+    /// @notice Badge ID for the Gold VIP tier.
     uint256 public goldBadgeId;
 
+    /// @notice Amount of stakingToken required for the Bronze tier.
     uint256 public bronzeAmount;
+    /// @notice Amount of stakingToken required for the Silver tier.
     uint256 public silverAmount;
+    /// @notice Amount of stakingToken required for the Gold tier.
     uint256 public goldAmount;
 
+    /// @notice The minimum duration required for the stake to be locked.
     uint256 public constant MIN_LOCK_DURATION = 30 days;
 
+    /**
+     * @dev Struct to store user locking information.
+     * @param amount The total amount of staking tokens locked by the user.
+     * @param unlockTime The timestamp when the lock expires and tokens can be withdrawn.
+     */
     struct LockInfo {
         uint256 amount;
         uint256 unlockTime;
     }
 
+    /// @notice Maps user addresses to their corresponding lock information.
     mapping(address => LockInfo) public locks;
 
+    /// @notice Error thrown when the staking amount is less than the bronze tier requirement.
     error InsufficientAmount();
+    /// @notice Error thrown when the requested lock duration is shorter than the minimum allowed.
     error LockDurationTooShort();
+    /// @notice Error thrown when attempting to unlock tokens while the lock is still active.
     error LockStillActive();
+    /// @notice Error thrown when a user attempts to unlock without having any tokens locked.
     error NoTokensLocked();
-    error InvalidBadgeId();
 
+    /**
+     * @notice Emitted when tokens are locked by a user.
+     * @param user The address of the user who locked tokens.
+     * @param amount The amount of tokens locked.
+     * @param unlockTime The timestamp when the lock will expire.
+     */
     event TokensLocked(
         address indexed user,
         uint256 amount,
         uint256 unlockTime
     );
+    /**
+     * @notice Emitted when tokens are unlocked by a user.
+     * @param user The address of the user who unlocked tokens.
+     * @param amount The amount of tokens unlocked.
+     */
     event TokensUnlocked(address indexed user, uint256 amount);
+    /**
+     * @notice Emitted when the staking amounts for tiers are updated by the owner.
+     * @param bronze The new amount for the Bronze tier.
+     * @param silver The new amount for the Silver tier.
+     * @param gold The new amount for the Gold tier.
+     */
     event AmountsUpdated(uint256 bronze, uint256 silver, uint256 gold);
 
     /// @custom:oz-upgrades-unsafe-allow constructor
@@ -57,76 +93,35 @@ contract SocietyVipManager is
         _disableInitializers();
     }
 
+    /**
+     * @notice Initializes the VIP Manager.
+     * @param _stakingToken Address of the ERC20 token to use for staking.
+     * @param _bronzeBadgeId ID of the pre-created Bronze VIP badge.
+     * @param _silverBadgeId ID of the pre-created Silver VIP badge.
+     * @param _goldBadgeId ID of the pre-created Gold VIP badge.
+     */
     function initialize(
         address _stakingToken,
-        address _badgesContract,
-        uint256 _governorBadgeId
+        uint256 _bronzeBadgeId,
+        uint256 _silverBadgeId,
+        uint256 _goldBadgeId
     ) public initializer {
         __Ownable_init(msg.sender);
         __UUPSUpgradeable_init();
         stakingToken = IERC20(_stakingToken);
-        badgesContract = SocietyProtocolBadges(_badgesContract);
-        governorBadgeId = _governorBadgeId;
 
-        bronzeAmount = 100e18;
-        silverAmount = 1000e18;
-        goldAmount = 10000e18;
-
-        uint256[] memory govRules = new uint256[](1);
-        govRules[0] = _governorBadgeId;
-
-        address[] memory editors = new address[](1);
-        editors[0] = owner();
-
-        // Create badges (as community/non-official)
-        bronzeBadgeId = _createVipBadge(
-            "Bronze VIP",
-            "ipfs://bronze",
-            govRules,
-            govRules,
-            govRules,
-            editors
-        );
-        silverBadgeId = _createVipBadge(
-            "Silver VIP",
-            "ipfs://silver",
-            govRules,
-            govRules,
-            govRules,
-            editors
-        );
-        goldBadgeId = _createVipBadge(
-            "Gold VIP",
-            "ipfs://gold",
-            govRules,
-            govRules,
-            govRules,
-            editors
-        );
+        bronzeBadgeId = _bronzeBadgeId;
+        silverBadgeId = _silverBadgeId;
+        goldBadgeId = _goldBadgeId;
     }
 
-    function _createVipBadge(
-        string memory name,
-        string memory uri,
-        uint256[] memory minters,
-        uint256[] memory transferers,
-        uint256[] memory burners,
-        address[] memory editors
-    ) internal returns (uint256) {
-        return
-            badgesContract.createBadge(
-                name,
-                false, // Created non-official, updateable by owner
-                false, // isCommunity = false
-                address(this),
-                uri,
-                minters,
-                transferers,
-                burners,
-                editors
-            );
-    }
-
+    /**
+     * @notice Updates the required amounts for each VIP tier.
+     * @dev Only callable by the contract owner.
+     * @param _bronze The new Bronze tier required amount.
+     * @param _silver The new Silver tier required amount.
+     * @param _gold The new Gold tier required amount.
+     */
     function setTierAmounts(
         uint256 _bronze,
         uint256 _silver,
@@ -142,6 +137,12 @@ contract SocietyVipManager is
         address newImplementation
     ) internal override onlyOwner {}
 
+    /**
+     * @notice Locks tokens into a VIP tier for a specified duration.
+     * @dev Extends existing lock time if the new unlockTime is further in the future.
+     * @param amount The amount of stakingToken to lock.
+     * @param duration The duration for which the tokens will be locked.
+     */
     function lock(uint256 amount, uint256 duration) external {
         if (amount < bronzeAmount) revert InsufficientAmount();
         if (duration < MIN_LOCK_DURATION) revert LockDurationTooShort();
@@ -166,6 +167,9 @@ contract SocietyVipManager is
         emit TokensLocked(msg.sender, amount, userLock.unlockTime);
     }
 
+    /**
+     * @notice Withdraws all locked tokens after the lock period has expired.
+     */
     function unlock() external {
         LockInfo storage userLock = locks[msg.sender];
         if (userLock.amount == 0) revert NoTokensLocked();
@@ -181,15 +185,23 @@ contract SocietyVipManager is
 
     // --- ISocietyBadgeHook ---
 
+    /**
+     * @notice Implementation of `onCheckMint` for dynamic badges.
+     * @dev VIP tier badges cannot be minted directly; they are earned by staking. Always returns false.
+     */
     function onCheckMint(
         address,
         address,
         uint256,
         uint256
     ) external pure returns (bool) {
-        return false; // Dynamic badges aren't minted directly
+        return false;
     }
 
+    /**
+     * @notice Implementation of `onCheckTransfer` for dynamic badges.
+     * @dev VIP tier badges are non-transferable. Always returns false.
+     */
     function onCheckTransfer(
         address,
         address,
@@ -197,18 +209,29 @@ contract SocietyVipManager is
         uint256,
         uint256
     ) external pure returns (bool) {
-        return false; // Dynamic badges aren't transferred
+        return false;
     }
 
+    /**
+     * @notice Implementation of `onCheckBurn` for dynamic badges.
+     * @dev VIP tier badges are not burnable in the standard sense. Always returns false.
+     */
     function onCheckBurn(
         address,
         address,
         uint256,
         uint256
     ) external pure returns (bool) {
-        return false; // Dynamic badges aren't burned
+        return false;
     }
 
+    /**
+     * @notice Implementation of `onBalanceOf` to determine tiered badge ownership.
+     * @dev Returns 1 if the `account` has locked enough tokens for the tier and the lock hasn't expired.
+     * @param account The address querying ownership.
+     * @param id The badge ID assigned to the VIP tier.
+     * @return 1 if the user owns the badge, 0 otherwise.
+     */
     function onBalanceOf(
         address account,
         uint256 id
@@ -220,7 +243,7 @@ contract SocietyVipManager is
             return 0;
         }
 
-        // Tier logic: only the highest tier badge is "held"
+        // Tier logic: higher tier locks are inclusive of the lower ones.
         if (id == goldBadgeId) {
             return userLock.amount >= goldAmount ? 1 : 0;
         } else if (id == silverBadgeId) {

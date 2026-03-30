@@ -23,21 +23,38 @@ contract SocietyProtocolBadges is
     UUPSUpgradeable,
     EIP712Upgradeable
 {
+    /// @notice Role required to create or modify "official" protocol badges.
     bytes32 public constant OFFICIAL_BADGE_CREATOR_ROLE =
         keccak256("OFFICIAL_BADGE_CREATOR_ROLE");
+    /// @notice Role required to authorize contract upgrades.
     bytes32 public constant CONTRACT_UPGRADER_ROLE =
         keccak256("CONTRACT_UPGRADER_ROLE");
 
-    uint256 public constant PERM_NONE = 0;
+    /// @notice Permission type: Only the recipient can perform the action (e.g., self-minting).
     uint256 public constant PERM_SELF = 1;
+    /// @notice Permission type: Anyone can perform the action.
     uint256 public constant PERM_EVERYONE = 2;
+    /// @notice The first valid ID for dynamic/user-created badges. IDs below this are reserved.
     uint256 public constant STARTING_BADGE_ID = 10;
 
+    /// @dev EIP-712 typehash for invitations.
     bytes32 private constant INVITE_TYPEHASH =
         keccak256("Invite(address inviter,string message)");
 
+    /**
+     * @notice Maps a user's address to the address of the person who invited them.
+     * @dev Used for tracking the invitation graph and preventing circular/self invitations.
+     */
     mapping(address => address) public invitedBy;
 
+    /**
+     * @dev Core information for a badge type.
+     * @param name Human-readable name of the badge.
+     * @param hook Optional address of a contract implementing ISocietyBadgeHook for dynamic logic.
+     * @param isOfficial True if the badge is an official protocol-level badge.
+     * @param isCommunity True if the badge has community-specific properties.
+     * @param metadataURI The IPFS or HTTPS link to the badge's metadata.
+     */
     struct BadgeInfo {
         string name;
         address hook;
@@ -46,26 +63,48 @@ contract SocietyProtocolBadges is
         string metadataURI;
     }
 
+    /// @notice Maps a badge ID to its detailed configuration.
     mapping(uint256 => BadgeInfo) public badges;
 
-    // badgeId => allowedBadgeIds to mint
+    /**
+     * @notice Permissions for minting a badge.
+     * @dev badgeId => uint256[] (array of required badge IDs or permission constants like PERM_EVERYONE).
+     */
     mapping(uint256 => uint256[]) public canMint;
-    // badgeId => allowedBadgeIds to transfer
+    /**
+     * @notice Permissions for transferring a badge.
+     * @dev badgeId => uint256[] (array of required badge IDs or permission constants like PERM_EVERYONE).
+     */
     mapping(uint256 => uint256[]) public canTransfer;
-    // badgeId => allowedBadgeIds to burn
+    /**
+     * @notice Permissions for burning a badge.
+     * @dev badgeId => uint256[] (array of required badge IDs or permission constants like PERM_EVERYONE).
+     */
     mapping(uint256 => uint256[]) public canBurn;
 
-    // badgeId => editor => isAllowed
+    /**
+     * @notice Maps a badge ID and an address to whether that address has permission to edit the badge's settings.
+     * @dev badgeId => editor => isAllowed.
+     */
     mapping(uint256 => mapping(address => bool)) public canEdit;
 
-    // user => profileBadgeId
+    /**
+     * @notice Maps a user's address to their unique profile badge ID.
+     * @dev user => profileBadgeId. Each user can have only one profile badge.
+     */
     mapping(address => uint256) public profileBadgeId;
 
-    // badgeId => list of editors (for enumeration)
-    mapping(uint256 => address[]) private _badgeEditors;
-
+    /// @notice The ID that will be assigned to the next created badge.
     uint256 public nextTokenId;
 
+    /**
+     * @notice Emitted when a new badge type is created.
+     * @param id The unique ID assigned to the new badge.
+     * @param name human-readable name of the badge.
+     * @param isOfficial True if created as an official badge.
+     * @param isCommunity True if created as a community badge.
+     * @param creator The address that initiated the creation.
+     */
     event BadgeCreated(
         uint256 indexed id,
         string name,
@@ -73,6 +112,9 @@ contract SocietyProtocolBadges is
         bool isCommunity,
         address indexed creator
     );
+    /**
+     * @notice Emitted when an existing badge's metadata or status is updated.
+     */
     event BadgeModified(
         uint256 indexed id,
         string name,
@@ -80,11 +122,17 @@ contract SocietyProtocolBadges is
         bool isCommunity,
         string metadataURI
     );
+    /**
+     * @notice Emitted when an editor's permissions for a badge are updated.
+     */
     event EditorsUpdated(
         uint256 indexed id,
         address indexed editor,
         bool isAllowed
     );
+    /**
+     * @notice Emitted to summarize the initial permissions assigned to a badge.
+     */
     event BadgePermissions(
         uint256 indexed id,
         uint256[] minters,
@@ -92,24 +140,41 @@ contract SocietyProtocolBadges is
         uint256[] burners,
         address[] editors
     );
+    /// @notice Emitted when the hook contract for a badge is changed.
     event HookUpdated(uint256 indexed id, address indexed hook);
+    /// @notice Emitted when a user creates their unique profile badge.
     event ProfileCreated(address indexed user, uint256 indexed id);
+    /// @notice Emitted when a user successfully accepts an invitation.
     event UserInvited(address indexed user, address indexed inviter);
 
-    // Custom Errors
+    // --- Custom Errors ---
+    /// @notice Generic unauthorized access error.
     error Unauthorized();
+    /// @notice Attempted to interact with a badge that has not been created yet.
     error BadgeDoesNotExist();
+    /// @notice Attempted to update a profile URI without ownership or if the badge isn't a profile.
     error NotProfileOwner();
+    /// @notice User attempted to create a second profile badge.
     error ProfileAlreadyExists();
+    /// @notice The badge's hook contract denied the minting operation.
     error MintDeniedByHook();
+    /// @notice The badge's hook contract denied the transfer operation.
     error TransferDeniedByHook();
+    /// @notice The badge's hook contract denied the burning operation.
     error BurnDeniedByHook();
+    /// @notice Standard credential-based minting permission check failed.
     error MintNotAuthorized();
+    /// @notice Standard credential-based transfer permission check failed.
     error TransferNotAuthorized();
+    /// @notice Standard credential-based burning permission check failed.
     error BurnNotAuthorized();
+    /// @notice User has already been invited or accepted an invite.
     error AlreadyInvited();
+    /// @notice Invitation signature verification failed.
     error InvalidSignature();
+    /// @notice A user attempted to invite themselves.
     error SelfInvitation();
+    /// @notice A circular invitation was detected (e.g., A invited B, and B attempted to invite A).
     error CircularInvitation();
 
     /// @custom:oz-upgrades-unsafe-allow constructor
@@ -117,6 +182,9 @@ contract SocietyProtocolBadges is
         _disableInitializers();
     }
 
+    /**
+     * @notice Initializes the Badge contract, setting up base roles and initializing required extensions.
+     */
     function initialize() public initializer {
         __ERC1155_init("");
         __AccessControl_init();
@@ -131,8 +199,19 @@ contract SocietyProtocolBadges is
         nextTokenId = STARTING_BADGE_ID;
     }
 
-    /// @notice Creates a new badge
-    /// @dev Open to anyone; official badges additionally require OFFICIAL_BADGE_CREATOR_ROLE
+    /**
+     * @notice Creates a new badge type with specific metadata and permissions.
+     * @param name Human-readable name.
+     * @param isOfficial If true, requires the caller to have `OFFICIAL_BADGE_CREATOR_ROLE`.
+     * @param isCommunity Flag for community categorization.
+     * @param hook Address of the custom logic contract (optional).
+     * @param metadataURI IPFS/HTTPS link to metadata.
+     * @param minters Array of IDs/constants allowed to mint.
+     * @param transferers Array of IDs/constants allowed to transfer.
+     * @param burners Array of IDs/constants allowed to burn.
+     * @param editors Array of addresses allowed to modify this badge later.
+     * @return id The newly assigned badge ID.
+     */
     function createBadge(
         string memory name,
         bool isOfficial,
@@ -168,8 +247,11 @@ contract SocietyProtocolBadges is
             );
     }
 
-    /// @notice Creates a unique profile badge for the caller
-    /// @dev One profile per address
+    /**
+     * @notice Creates a user's unique (soulbound-by-default) profile badge.
+     * @param metadataURI Metadata link for the user's profile.
+     * @return pid The newly created profile badge ID.
+     */
     function createProfile(
         string memory metadataURI
     ) external returns (uint256) {
@@ -192,6 +274,7 @@ contract SocietyProtocolBadges is
             editors
         );
 
+        // Temporarily allow self-minting for the creation transaction
         canMint[pid].push(PERM_SELF);
         _mint(msg.sender, pid, 1, "");
         canMint[pid].pop();
@@ -201,6 +284,9 @@ contract SocietyProtocolBadges is
         return pid;
     }
 
+    /**
+     * @dev Internal helper for badge creation logic.
+     */
     function _createBadge(
         string memory name,
         bool isOfficial,
@@ -234,7 +320,6 @@ contract SocietyProtocolBadges is
         // Setup editors
         for (uint256 i = 0; i < editors.length; i++) {
             canEdit[id][editors[i]] = true;
-            _badgeEditors[id].push(editors[i]);
             emit EditorsUpdated(id, editors[i], true);
         }
 
@@ -243,16 +328,21 @@ contract SocietyProtocolBadges is
         return id;
     }
 
-    /// @notice Sets a hook contract for a specific badge
-    /// @dev Only callable by badge editors (canEdit[id][msg.sender])
+    /**
+     * @notice Updates the hook contract for a specific badge ID.
+     * @param id The badge type ID.
+     * @param hook The new hook contract address.
+     */
     function setBadgeHook(uint256 id, address hook) external {
         if (!canEdit[id][msg.sender]) revert Unauthorized();
         badges[id].hook = hook;
         emit HookUpdated(id, hook);
     }
 
-    /// @notice Modifies an existing badge
-    /// @dev Callable by badge editors; toggling isOfficial additionally requires OFFICIAL_BADGE_CREATOR_ROLE
+    /**
+     * @notice Modifies a badge's name, type, and URI.
+     * @dev Toggling official status requires `OFFICIAL_BADGE_CREATOR_ROLE`.
+     */
     function modifyBadge(
         uint256 id,
         string memory name,
@@ -287,6 +377,9 @@ contract SocietyProtocolBadges is
         emit URI(metadataURI, id);
     }
 
+    /**
+     * @notice Standard ERC1155 minting wrapper.
+     */
     function mint(
         address to,
         uint256 id,
@@ -299,11 +392,7 @@ contract SocietyProtocolBadges is
     }
 
     /**
-     * @notice Mints multiple badges to a single recipient
-     * @param to The recipient address
-     * @param ids Array of badge IDs to mint
-     * @param amounts Array of amounts for each badge ID
-     * @param data Additional data for the minting operation
+     * @notice Batch mint multiple badges to a single recipient.
      */
     function mintBatch(
         address to,
@@ -319,8 +408,8 @@ contract SocietyProtocolBadges is
     }
 
     /**
-     * @notice Overrides standard safeTransferFrom to allow transfers based on badge permissions
-     * @dev Bypasses standard isApprovedForAll check. Security is enforced in _update hook.
+     * @notice Transfers a badge from one address to another.
+     * @dev SECURITY NOTE: Bypasses standard `isApprovedForAll` check to enable permission-based automated logic in `_update`.
      */
     function safeTransferFrom(
         address from,
@@ -335,8 +424,8 @@ contract SocietyProtocolBadges is
     }
 
     /**
-     * @notice Overrides standard safeBatchTransferFrom to allow transfers based on badge permissions
-     * @dev Bypasses standard isApprovedForAll check. Security is enforced in _update hook.
+     * @notice Batch transfers badges from one address to another.
+     * @dev SECURITY NOTE: Bypasses standard `isApprovedForAll` check.
      */
     function safeBatchTransferFrom(
         address from,
@@ -351,11 +440,7 @@ contract SocietyProtocolBadges is
     }
 
     /**
-     * @notice Burns tokens from a specified address
-     * @dev Bypasses standard isApprovedForAll check. Security is enforced in _update hook.
-     * @param from The address to burn from
-     * @param id The badge ID to burn
-     * @param value The amount to burn
+     * @notice Standard public burn function.
      */
     function burn(address from, uint256 id, uint256 value) public {
         if (id > nextTokenId) revert BadgeDoesNotExist();
@@ -363,11 +448,7 @@ contract SocietyProtocolBadges is
     }
 
     /**
-     * @notice Burns multiple badges from a specified address
-     * @dev Bypasses standard isApprovedForAll check. Security is enforced in _update hook.
-     * @param from The address to burn from
-     * @param ids Array of badge IDs to burn
-     * @param values Array of amounts to burn for each badge ID
+     * @notice Batch burn multiple badges.
      */
     function burnBatch(
         address from,
@@ -381,11 +462,7 @@ contract SocietyProtocolBadges is
     }
 
     /**
-     * @notice Mints a single badge to multiple recipients
-     * @param to Array of recipient addresses
-     * @param id The badge ID to mint
-     * @param amount The amount to mint for each recipient
-     * @param data Additional data for the minting operation
+     * @notice Mints a single badge type to multiple different addresses in one call.
      */
     function mintToMultiple(
         address[] memory to,
@@ -400,16 +477,19 @@ contract SocietyProtocolBadges is
         }
     }
 
-    /// @notice Updates the metadata URI for a badge
-    /// @dev Only callable by editors
+    /**
+     * @notice Updates the metadata URI for a badge.
+     * @dev Reserved for badge editors.
+     */
     function setURI(uint256 id, string memory newUri) external {
         if (!canEdit[id][msg.sender]) revert Unauthorized();
         badges[id].metadataURI = newUri;
         emit URI(newUri, id);
     }
 
-    /// @notice Updates the metadata URI for a user's profile
-    /// @dev Only callable by the profile owner
+    /**
+     * @notice Specifically for profile badges, allows the user holding it to update their metadata link.
+     */
     function updateProfileURI(uint256 id, string memory newUri) external {
         // Allow update if sender owns the token and it's a unique NFT (Profile)
         if (totalSupply(id) != 1 || balanceOf(msg.sender, id) != 1)
@@ -419,10 +499,17 @@ contract SocietyProtocolBadges is
         emit URI(newUri, id);
     }
 
+    /**
+     * @notice Standard ERC1155 URI getter.
+     */
     function uri(uint256 id) public view override returns (string memory) {
         return badges[id].metadataURI;
     }
 
+    /**
+     * @notice Returns the account balance for a specific badge.
+     * @dev Redirects check to the badge's hook if one is configured.
+     */
     function balanceOf(
         address account,
         uint256 id
@@ -434,6 +521,9 @@ contract SocietyProtocolBadges is
         return super.balanceOf(account, id);
     }
 
+    /**
+     * @notice Batch getter for badge balances.
+     */
     function balanceOfBatch(
         address[] memory accounts,
         uint256[] memory ids
@@ -445,14 +535,18 @@ contract SocietyProtocolBadges is
         return batchBalances;
     }
 
-    /// @notice Returns the list of badges required to mint the given badgeId
+    /**
+     * @notice Returns the credentials (badge IDs) required to mint this badge type.
+     */
     function getBadgeMinters(
         uint256 id
     ) external view returns (uint256[] memory) {
         return canMint[id];
     }
 
-    /// @notice Returns the list of badges required to transfer the given badgeId
+    /**
+     * @notice Returns the credentials (badge IDs) required to transfer this badge type.
+     */
     function getBadgeTransferers(
         uint256 id
     ) external view returns (uint256[] memory) {
@@ -460,10 +554,12 @@ contract SocietyProtocolBadges is
     }
 
     /**
-     * @notice Accepts an invitation from another user
-     * @param inviter The address that issued the invite
-     * @param message The message that was signed
-     * @param signature The EIP-712 signature from the inviter
+     * @notice Accepts an invitation signed by an existing protocol user.
+     * @dev This prevents bots by requiring a signature from a valid user. 
+     * Verifies that the signed message ends with the caller's hexadecimal address.
+     * @param inviter The address of the user who signed the invitation.
+     * @param message The signed string message.
+     * @param signature The EIP-712 or personal sign signature.
      */
     function acceptInvite(
         address inviter,
@@ -478,11 +574,13 @@ contract SocietyProtocolBadges is
         uint256 len = msgBytes.length;
         if (len < 42) revert InvalidSignature();
 
+        // Extract the trailing address string from the message
         bytes memory addressBytes = new bytes(42);
         for (uint256 i = 0; i < 42; i++) {
             addressBytes[i] = msgBytes[len - 42 + i];
         }
 
+        // Validate that the message suffix matches the caller's address in hex
         if (
             keccak256(addressBytes) !=
             keccak256(bytes(Strings.toHexString(msg.sender)))
@@ -515,20 +613,22 @@ contract SocietyProtocolBadges is
         emit UserInvited(msg.sender, inviter);
     }
 
-    /// @notice Returns the list of badges required to burn the given badgeId
+    /**
+     * @notice Returns the credentials (badge IDs) required to burn this badge type.
+     */
     function getBadgeBurners(
         uint256 id
     ) external view returns (uint256[] memory) {
         return canBurn[id];
     }
 
-    /// @notice Returns the list of addresses authorized to edit the given badgeId
-    function getBadgeEditors(
-        uint256 id
-    ) external view returns (address[] memory) {
-        return _badgeEditors[id];
-    }
-
+    /**
+     * @notice Overridden internal update hook to enforce all badge permissions.
+     * @dev This is the central security mechanism. It checks:
+     * 1. Hook contracts (highest priority).
+     * 2. Permission constants (PERM_EVERYONE, PERM_SELF).
+     * 3. Badge-gated requirements (user MUST hold a specific badge ID).
+     */
     function _update(
         address from,
         address to,
@@ -603,6 +703,7 @@ contract SocietyProtocolBadges is
                         }
                     }
                     if (rule >= STARTING_BADGE_ID) {
+                        // User must hold the required badge effectively (hook check included)
                         if (balanceOf(msg.sender, rule) > 0) {
                             allowed = true;
                             break;
@@ -624,6 +725,9 @@ contract SocietyProtocolBadges is
         address newImplementation
     ) internal override onlyRole(CONTRACT_UPGRADER_ROLE) {}
 
+    /**
+     * @notice Standard ERC1155/AccessControl interface support check.
+     */
     function supportsInterface(
         bytes4 interfaceId
     )

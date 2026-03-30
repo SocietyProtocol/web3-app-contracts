@@ -92,12 +92,21 @@ describe("CommunityWrapper and Upgradeable Factory", function () {
             await (badges as any).createBadge("Badge 2", true, false, ethers.ZeroAddress, "uri2", [PERM_EVERYONE], [], [], []);
         });
 
-        it("Should return 1 only if user has ALL badges", async function () {
+        it("Should return the sum of all required badges", async function () {
             await badges.mint(user1.address, ID1, 1, "0x");
-            expect(await wrapper.balanceOf(user1.address)).to.equal(0);
+            expect(await wrapper.balanceOf(user1.address)).to.equal(1);
 
             await badges.mint(user1.address, ID2, 1, "0x");
-            expect(await wrapper.balanceOf(user1.address)).to.equal(1);
+            expect(await wrapper.balanceOf(user1.address)).to.equal(2);
+        });
+
+        it("Should sum balances for multiple badges and amounts correctly", async function () {
+            // User has 4 of Badge ID1 and 2 of Badge ID2
+            await badges.mint(user1.address, ID1, 4, "0x");
+            await badges.mint(user1.address, ID2, 2, "0x");
+            
+            // Total balance should be 4 + 2 = 6
+            expect(await wrapper.balanceOf(user1.address)).to.equal(6);
         });
     });
 
@@ -233,12 +242,12 @@ describe("CommunityWrapper and Upgradeable Factory", function () {
             await (badges as any).createBadge("B3", true, false, ethers.ZeroAddress, "u3", [PERM_EVERYONE], [], [], []); // 13
 
             // Mint badges to users
-            // u1 has ID1
+            // u1 has 1 of ID1
             await badges.mint(u1.address, ID1, 1, "0x");
-            // u2 has ID1, ID2
+            // u2 has 1 of ID1, 1 of ID2
             await badges.mint(u2.address, ID1, 1, "0x");
             await badges.mint(u2.address, ID2, 1, "0x");
-            // u3 has ID2, ID3
+            // u3 has 1 of ID2, 1 of ID3
             await badges.mint(u3.address, ID2, 1, "0x");
             await badges.mint(u3.address, ID3, 1, "0x");
         });
@@ -250,14 +259,14 @@ describe("CommunityWrapper and Upgradeable Factory", function () {
             expect(await w1.balanceOf(u3.address)).to.equal(0);
 
             // Check W2 (requires ID1, ID2)
-            expect(await w2.balanceOf(u1.address)).to.equal(0);
-            expect(await w2.balanceOf(u2.address)).to.equal(1);
-            expect(await w2.balanceOf(u3.address)).to.equal(0);
+            expect(await w2.balanceOf(u1.address)).to.equal(1); // Sum: u1 has 1 of ID1, 0 of ID2 result 1
+            expect(await w2.balanceOf(u2.address)).to.equal(2); // Sum: u2 has 1 of ID1, 1 of ID2 result 2
+            expect(await w2.balanceOf(u3.address)).to.equal(1); // Sum: u3 has 0 of ID1, 1 of ID2 result 1
 
             // Check W3 (requires ID2, ID3)
             expect(await w3.balanceOf(u1.address)).to.equal(0);
-            expect(await w3.balanceOf(u2.address)).to.equal(0);
-            expect(await w3.balanceOf(u3.address)).to.equal(1);
+            expect(await w3.balanceOf(u2.address)).to.equal(1); // Sum: u2 has 0 of ID2(actually u2 has ID2 balance 1), 1 of ID2 + 0 of ID3 = 1
+            expect(await w3.balanceOf(u3.address)).to.equal(2); // Sum: u3 has 1 of ID2, 1 of ID3 = 2
         });
 
         it("Owners should only be able to manage their own wrappers", async function () {
