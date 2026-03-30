@@ -26,7 +26,12 @@ contract CommunityWrapperFactory is
     );
     event ImplementationUpdated(address indexed newImplementation);
 
+    /// @notice The contract address of the SocietyProtocolBadges ERC1155.
     address public badgeContract;
+    /**
+     * @notice The implementation contract address used as a template for new clones.
+     * @dev This address is used by `Clones.clone` to create minimal proxies.
+     */
     address public wrapperImplementation;
 
     /// @custom:oz-upgrades-unsafe-allow constructor
@@ -35,10 +40,10 @@ contract CommunityWrapperFactory is
     }
 
     /**
-     * @notice Initializes the factory.
-     * @param _badgeContract Address of the ERC1155 badge contract.
-     * @param _wrapperImplementation Initial implementation address for wrappers.
-     * @param _owner Owner of the factory.
+     * @notice Initializes the factory as a UUPS-upgradeable contract.
+     * @param _badgeContract The address of the main Badge contract.
+     * @param _wrapperImplementation The logic contract address to use for clones.
+     * @param _owner The address that will own and manage the factory.
      */
     function initialize(
         address _badgeContract,
@@ -56,8 +61,9 @@ contract CommunityWrapperFactory is
     }
 
     /**
-     * @notice Updates the wrapper implementation for new deployments.
-     * @param _newImplementation The new logic contract address.
+     * @notice Updates the logic contract used for future wrapper deployments.
+     * @dev Does not affect already deployed wrappers (clones keep their original implementation logic).
+     * @param _newImplementation The address of the new CommunityWrapper logic contract.
      */
     function setWrapperImplementation(
         address _newImplementation
@@ -68,11 +74,11 @@ contract CommunityWrapperFactory is
     }
 
     /**
-     * @notice Deploys a new CommunityWrapper using Clones.
-     * @param name ERC20 name for the wrapper.
-     * @param symbol ERC20 symbol for the wrapper.
-     * @param initialBadgeIds Initial list of required badge IDs.
-     * @return Address of the newly deployed wrapper.
+     * @notice Deploys a new, standalone CommunityWrapper using the EIP-1167 Clones pattern.
+     * @param name The name for the new ERC20 wrapper.
+     * @param symbol The symbol for the new ERC20 wrapper.
+     * @param initialBadgeIds The set of badge IDs that will define membership for this community.
+     * @return clone The address of the newly created wrapper proxy.
      */
     function createWrapper(
         string calldata name,
