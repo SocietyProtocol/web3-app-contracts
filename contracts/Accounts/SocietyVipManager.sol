@@ -60,7 +60,10 @@ contract SocietyVipManager is
     function initialize(
         address _stakingToken,
         address _badgesContract,
-        uint256 _governorBadgeId
+        uint256 _governorBadgeId,
+        uint256 _bronzeBadgeId,
+        uint256 _silverBadgeId,
+        uint256 _goldBadgeId
     ) public initializer {
         __Ownable_init(msg.sender);
         __UUPSUpgradeable_init();
@@ -68,63 +71,13 @@ contract SocietyVipManager is
         badgesContract = SocietyProtocolBadges(_badgesContract);
         governorBadgeId = _governorBadgeId;
 
+        bronzeBadgeId = _bronzeBadgeId;
+        silverBadgeId = _silverBadgeId;
+        goldBadgeId = _goldBadgeId;
+
         bronzeAmount = 100e18;
         silverAmount = 1000e18;
         goldAmount = 10000e18;
-
-        uint256[] memory govRules = new uint256[](1);
-        govRules[0] = _governorBadgeId;
-
-        address[] memory editors = new address[](1);
-        editors[0] = owner();
-
-        // Create badges (as community/non-official)
-        bronzeBadgeId = _createVipBadge(
-            "Bronze VIP",
-            "ipfs://bronze",
-            govRules,
-            govRules,
-            govRules,
-            editors
-        );
-        silverBadgeId = _createVipBadge(
-            "Silver VIP",
-            "ipfs://silver",
-            govRules,
-            govRules,
-            govRules,
-            editors
-        );
-        goldBadgeId = _createVipBadge(
-            "Gold VIP",
-            "ipfs://gold",
-            govRules,
-            govRules,
-            govRules,
-            editors
-        );
-    }
-
-    function _createVipBadge(
-        string memory name,
-        string memory uri,
-        uint256[] memory minters,
-        uint256[] memory transferers,
-        uint256[] memory burners,
-        address[] memory editors
-    ) internal returns (uint256) {
-        return
-            badgesContract.createBadge(
-                name,
-                false, // Created non-official, updateable by owner
-                false, // isCommunity = false
-                address(this),
-                uri,
-                minters,
-                transferers,
-                burners,
-                editors
-            );
     }
 
     function setTierAmounts(

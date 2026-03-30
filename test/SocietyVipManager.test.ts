@@ -28,13 +28,8 @@ describe("Society VIP Manager", function () {
         stakingToken = (await Token.deploy()) as unknown as SPEC;
         await stakingToken.waitForDeployment();
 
-        // 3. Deploy VIP Manager via Proxy
-        const VipManager = await ethers.getContractFactory("SocietyVipManager");
-        vipManager = (await upgrades.deployProxy(VipManager, [], { initializer: false })) as unknown as SocietyVipManager;
-        await vipManager.waitForDeployment();
-
-        // 4. Create Governor Badge for owner
-        const govTx = await badges.createBadge("Governor", false, true, ethers.ZeroAddress, "ipfs://gov", [2], [], [], [owner.address]);
+        // 3. Create Governor Badge for owner
+        const govTx = await badges.createBadge("Governor", true, false, ethers.ZeroAddress, "ipfs://gov", [2], [], [], [owner.address]);
         const govReceipt = await govTx.wait();
         const govEvent = govReceipt?.logs.find((l: any) => l.fragment && l.fragment.name === 'BadgeCreated') as any;
         const governorBadgeId = govEvent?.args[0];
@@ -42,15 +37,46 @@ describe("Society VIP Manager", function () {
         // Mint Governor badge to owner
         await badges.mint(owner.address, governorBadgeId, 1, "0x");
 
-        // 5. Initialize Manager
-        await vipManager.initialize(await stakingToken.getAddress(), await badges.getAddress(), governorBadgeId);
+        // 4. Create official VIP tier badges (mirrors deploy script)
+        const bronzeTx = await badges.createBadge("Bronze VIP", true, false, ethers.ZeroAddress, "", [], [], [governorBadgeId], [owner.address]);
+        const bronzeReceipt = await bronzeTx.wait();
+        const bronzeEvent = bronzeReceipt?.logs.find((l: any) => l.fragment && l.fragment.name === 'BadgeCreated') as any;
+        const bronzeBadgeId = bronzeEvent?.args[0];
+
+        const silverTx = await badges.createBadge("Silver VIP", true, false, ethers.ZeroAddress, "", [], [], [governorBadgeId], [owner.address]);
+        const silverReceipt = await silverTx.wait();
+        const silverEvent = silverReceipt?.logs.find((l: any) => l.fragment && l.fragment.name === 'BadgeCreated') as any;
+        const silverBadgeId = silverEvent?.args[0];
+
+        const goldTx = await badges.createBadge("Gold VIP", true, false, ethers.ZeroAddress, "", [], [], [governorBadgeId], [owner.address]);
+        const goldReceipt = await goldTx.wait();
+        const goldEvent = goldReceipt?.logs.find((l: any) => l.fragment && l.fragment.name === 'BadgeCreated') as any;
+        const goldBadgeId = goldEvent?.args[0];
+
+        // 5. Deploy VIP Manager and initialize with the pre-created badge IDs
+        const VipManager = await ethers.getContractFactory("SocietyVipManager");
+        vipManager = (await upgrades.deployProxy(VipManager, [
+            await stakingToken.getAddress(),
+            await badges.getAddress(),
+            governorBadgeId,
+            bronzeBadgeId,
+            silverBadgeId,
+            goldBadgeId,
+        ], { initializer: 'initialize' })) as unknown as SocietyVipManager;
+        await vipManager.waitForDeployment();
+
+        // 6. Wire up the hooks on each badge to point to VIP Manager
+        const vipManagerAddress = await vipManager.getAddress();
+        await badges.setBadgeHook(bronzeBadgeId, vipManagerAddress);
+        await badges.setBadgeHook(silverBadgeId, vipManagerAddress);
+        await badges.setBadgeHook(goldBadgeId, vipManagerAddress);
 
         // Fund user1
         await stakingToken.transfer(user1.address, ethers.parseEther("20000"));
         await stakingToken.connect(user1).approve(await vipManager.getAddress(), ethers.MaxUint256);
     });
 
-    it("Should initialize with correct values and create badges", async function () {
+    it("Should initialize with correct values and accept badge IDs", async function () {
         expect(await vipManager.owner()).to.equal(owner.address);
         expect(await vipManager.bronzeBadgeId()).to.be.gt(0);
         expect(await vipManager.silverBadgeId()).to.be.gt(0);
