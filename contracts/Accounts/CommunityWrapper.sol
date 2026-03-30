@@ -25,7 +25,6 @@ contract CommunityWrapper is
     error BadgeAlreadyAdded();
     error BadgeNotFound();
     error TransfersDisabled();
-    error AlreadyInitialized();
 
     /// @custom:oz-upgrades-unsafe-allow constructor
     constructor() {

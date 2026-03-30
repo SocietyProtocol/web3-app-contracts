@@ -232,12 +232,15 @@ describe("Society Protocol Badges (Upgradeable) - Refactored", function () {
             const storedMinters = await badges.getBadgeMinters(id);
             const storedTransferers = await badges.getBadgeTransferers(id);
             const storedBurners = await badges.getBadgeBurners(id);
-            const storedEditors = await badges.getBadgeEditors(id);
 
             expect(storedMinters).to.deep.equal(minters);
             expect(storedTransferers).to.deep.equal(transferers);
             expect(storedBurners).to.deep.equal(burners);
-            expect(storedEditors).to.deep.equal(editors);
+
+            // Editors are tracked via canEdit mapping (no on-chain enumeration)
+            for (const editor of editors) {
+                expect(await badges.canEdit(id, editor)).to.be.true;
+            }
         });
     });
 

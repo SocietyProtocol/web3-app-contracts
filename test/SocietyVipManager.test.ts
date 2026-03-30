@@ -57,8 +57,6 @@ describe("Society VIP Manager", function () {
         const VipManager = await ethers.getContractFactory("SocietyVipManager");
         vipManager = (await upgrades.deployProxy(VipManager, [
             await stakingToken.getAddress(),
-            await badges.getAddress(),
-            governorBadgeId,
             bronzeBadgeId,
             silverBadgeId,
             goldBadgeId,

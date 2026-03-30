@@ -7,7 +7,6 @@ import "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
 import "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
 import "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
 import "./ISocietyBadgeHook.sol";
-import "./SocietyProtocolBadges.sol";
 
 contract SocietyVipManager is
     Initializable,
@@ -18,8 +17,6 @@ contract SocietyVipManager is
     using SafeERC20 for IERC20;
 
     IERC20 public stakingToken;
-    SocietyProtocolBadges public badgesContract;
-    uint256 public governorBadgeId;
 
     uint256 public bronzeBadgeId;
     uint256 public silverBadgeId;
@@ -42,7 +39,7 @@ contract SocietyVipManager is
     error LockDurationTooShort();
     error LockStillActive();
     error NoTokensLocked();
-    error InvalidBadgeId();
+
 
     event TokensLocked(
         address indexed user,
@@ -59,8 +56,6 @@ contract SocietyVipManager is
 
     function initialize(
         address _stakingToken,
-        address _badgesContract,
-        uint256 _governorBadgeId,
         uint256 _bronzeBadgeId,
         uint256 _silverBadgeId,
         uint256 _goldBadgeId
@@ -68,8 +63,6 @@ contract SocietyVipManager is
         __Ownable_init(msg.sender);
         __UUPSUpgradeable_init();
         stakingToken = IERC20(_stakingToken);
-        badgesContract = SocietyProtocolBadges(_badgesContract);
-        governorBadgeId = _governorBadgeId;
 
         bronzeBadgeId = _bronzeBadgeId;
         silverBadgeId = _silverBadgeId;

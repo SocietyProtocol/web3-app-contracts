@@ -93,8 +93,6 @@ async function main() {
         factory,
         [
             STAKING_TOKEN_ADDRESS,
-            BADGES_CONTRACT_ADDRESS,
-            governorId,
             bronzeId,
             silverId,
             goldId,

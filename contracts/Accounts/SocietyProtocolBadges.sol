@@ -28,7 +28,6 @@ contract SocietyProtocolBadges is
     bytes32 public constant CONTRACT_UPGRADER_ROLE =
         keccak256("CONTRACT_UPGRADER_ROLE");
 
-    uint256 public constant PERM_NONE = 0;
     uint256 public constant PERM_SELF = 1;
     uint256 public constant PERM_EVERYONE = 2;
     uint256 public constant STARTING_BADGE_ID = 10;
@@ -61,8 +60,7 @@ contract SocietyProtocolBadges is
     // user => profileBadgeId
     mapping(address => uint256) public profileBadgeId;
 
-    // badgeId => list of editors (for enumeration)
-    mapping(uint256 => address[]) private _badgeEditors;
+
 
     uint256 public nextTokenId;
 
@@ -234,7 +232,6 @@ contract SocietyProtocolBadges is
         // Setup editors
         for (uint256 i = 0; i < editors.length; i++) {
             canEdit[id][editors[i]] = true;
-            _badgeEditors[id].push(editors[i]);
             emit EditorsUpdated(id, editors[i], true);
         }
 
@@ -522,12 +519,7 @@ contract SocietyProtocolBadges is
         return canBurn[id];
     }
 
-    /// @notice Returns the list of addresses authorized to edit the given badgeId
-    function getBadgeEditors(
-        uint256 id
-    ) external view returns (address[] memory) {
-        return _badgeEditors[id];
-    }
+
 
     function _update(
         address from,
