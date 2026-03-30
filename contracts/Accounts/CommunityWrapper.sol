@@ -8,8 +8,8 @@ import "@openzeppelin/contracts/token/ERC1155/IERC1155.sol";
 
 /**
  * @title CommunityWrapper
- * @notice A non-transferable ERC20 wrapper that returns a binary balance based on ERC1155 badge ownership.
- * @dev Balance is 1 if the user holds all required badges, 0 otherwise.
+ * @notice A non-transferable ERC20 wrapper that returns a cumulative balance based on ERC1155 badge ownership.
+ * @dev Balance is the sum of the account's balances for all required badge IDs.
  * @dev This contract is designed to be used with the Clones pattern.
  */
 contract CommunityWrapper is
