@@ -10,9 +10,9 @@ describe("Society VIP Manager", function () {
     let owner: any;
     let user1: any;
 
-    const BRONZE_AMOUNT = ethers.parseEther("100");
-    const SILVER_AMOUNT = ethers.parseEther("1000");
-    const GOLD_AMOUNT = ethers.parseEther("10000");
+    const BRONZE_AMOUNT = ethers.parseEther("400000");
+    const SILVER_AMOUNT = ethers.parseEther("2000000");
+    const GOLD_AMOUNT = ethers.parseEther("10000000");
     const ONE_MONTH = 30 * 24 * 60 * 60;
 
     beforeEach(async function () {
@@ -63,14 +63,17 @@ describe("Society VIP Manager", function () {
         ], { initializer: 'initialize' })) as unknown as SocietyVipManager;
         await vipManager.waitForDeployment();
 
-        // 6. Wire up the hooks on each badge to point to VIP Manager
+        // 6. Set Tier Amounts post-initialization
+        await (await vipManager.setTierAmounts(BRONZE_AMOUNT, SILVER_AMOUNT, GOLD_AMOUNT)).wait();
+
+        // 7. Wire up the hooks on each badge to point to VIP Manager
         const vipManagerAddress = await vipManager.getAddress();
         await badges.setBadgeHook(bronzeBadgeId, vipManagerAddress);
         await badges.setBadgeHook(silverBadgeId, vipManagerAddress);
         await badges.setBadgeHook(goldBadgeId, vipManagerAddress);
 
-        // Fund user1
-        await stakingToken.transfer(user1.address, ethers.parseEther("20000"));
+        // Fund user1 with enough for Gold tier (10M+)
+        await stakingToken.transfer(user1.address, ethers.parseEther("12000000"));
         await stakingToken.connect(user1).approve(await vipManager.getAddress(), ethers.MaxUint256);
     });
 
@@ -88,22 +91,22 @@ describe("Society VIP Manager", function () {
         const silverId = await vipManager.silverBadgeId();
         const goldId = await vipManager.goldBadgeId();
 
-        // Lock 500 TEST -> Should get Bronze
-        await vipManager.connect(user1).lock(ethers.parseEther("500"), ONE_MONTH);
+        // Lock 500,000 -> Should get Bronze
+        await vipManager.connect(user1).lock(ethers.parseEther("500000"), ONE_MONTH);
 
         expect(await badges.balanceOf(user1.address, bronzeId)).to.equal(1);
         expect(await badges.balanceOf(user1.address, silverId)).to.equal(0);
         expect(await badges.balanceOf(user1.address, goldId)).to.equal(0);
 
-        // Lock another 600 TEST -> Total 1100 -> Should get Silver AND Bronze
-        await vipManager.connect(user1).lock(ethers.parseEther("600"), ONE_MONTH);
+        // Lock another 1,500,000 -> Total 2,000,000 -> Should get Silver AND Bronze
+        await vipManager.connect(user1).lock(ethers.parseEther("1500000"), ONE_MONTH);
 
         expect(await badges.balanceOf(user1.address, bronzeId)).to.equal(1);
         expect(await badges.balanceOf(user1.address, silverId)).to.equal(1);
         expect(await badges.balanceOf(user1.address, goldId)).to.equal(0);
 
-        // Lock another 10000 TEST -> Total 11100 -> Should get Gold, Silver, and Bronze
-        await vipManager.connect(user1).lock(ethers.parseEther("10000"), ONE_MONTH);
+        // Lock another 8,000,000 -> Total 10,000,000 -> Should get Gold, Silver, and Bronze
+        await vipManager.connect(user1).lock(ethers.parseEther("8000000"), ONE_MONTH);
 
         expect(await badges.balanceOf(user1.address, goldId)).to.equal(1);
         expect(await badges.balanceOf(user1.address, silverId)).to.equal(1);
@@ -112,7 +115,7 @@ describe("Society VIP Manager", function () {
 
     it("Should fail if locking less than bronze amount", async function () {
         await expect(
-            vipManager.connect(user1).lock(ethers.parseEther("50"), ONE_MONTH)
+            vipManager.connect(user1).lock(ethers.parseEther("300000"), ONE_MONTH)
         ).to.be.revertedWithCustomError(vipManager, "InsufficientAmount");
     });
 
@@ -128,11 +131,11 @@ describe("Society VIP Manager", function () {
     });
 
     it("Should allow owner to change tier amounts", async function () {
-        const newBronze = ethers.parseEther("500");
+        const newBronze = ethers.parseEther("500000");
         await vipManager.setTierAmounts(newBronze, SILVER_AMOUNT, GOLD_AMOUNT);
         expect(await vipManager.bronzeAmount()).to.equal(newBronze);
 
-        // Now locking 100 should fail
+        // Now locking 400k (original bronze) should fail
         await expect(
             vipManager.connect(user1).lock(BRONZE_AMOUNT, ONE_MONTH)
         ).to.be.revertedWithCustomError(vipManager, "InsufficientAmount");

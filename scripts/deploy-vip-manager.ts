@@ -104,7 +104,15 @@ async function main() {
     const contractAddress = await contract.getAddress();
     console.log("SocietyVipManager proxy deployed to:", contractAddress);
 
-    // ── 3. Point the VIP tier badge hooks to the VIP Manager ────────────────────
+    // ── 3. Set VIP Tier amounts ──────────────────────────────────────────────────
+    console.log("\nSetting VIP Tier amounts (Bronze: 400k, Silver: 2M, Gold: 10M)...");
+    const bronzeAmount = ethers.parseEther("400000");
+    const silverAmount = ethers.parseEther("2000000");
+    const goldAmount = ethers.parseEther("10000000");
+    await (await contract.setTierAmounts(bronzeAmount, silverAmount, goldAmount)).wait();
+    console.log("Tier amounts set successfully.");
+
+    // ── 4. Point the VIP tier badge hooks to the VIP Manager ────────────────────
     // The hook address is the VIP Manager itself; it implements ISocietyBadgeHook
     // and overrides balanceOf() dynamically based on locked token amounts.
     console.log("\nSetting VIP Manager as hook on all three tier badges...");

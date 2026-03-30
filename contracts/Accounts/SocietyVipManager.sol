@@ -113,10 +113,6 @@ contract SocietyVipManager is
         bronzeBadgeId = _bronzeBadgeId;
         silverBadgeId = _silverBadgeId;
         goldBadgeId = _goldBadgeId;
-
-        bronzeAmount = 100e18;
-        silverAmount = 1000e18;
-        goldAmount = 10000e18;
     }
 
     /**
