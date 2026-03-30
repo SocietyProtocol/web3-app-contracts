@@ -67,27 +67,19 @@ contract CommunityWrapper is
     }
 
     /**
-     * @notice Calculates the user's balance.
-     * @dev Returns 1 if the account holds ALL required badges, 0 otherwise. 
-     * This turns the ERC20 into a binary "proof of membership" token.
-     * @param account The address to check membership for.
-     * @return 1 for members, 0 for non-members.
+     * @notice Calculates the user's total balance.
+     * @dev Returns the sum of the account's balances for all required badge IDs. 
+     * Each individual badge held adds to the total balance of this wrapper.
+     * @param account The address to check total badge balance for.
+     * @return The combined balance across all required badges.
      */
     function balanceOf(address account) public view override returns (uint256) {
+        uint256 total = 0;
         uint256 length = allowedBadgeIds.length;
-        if (length == 0) return 0;
-
         for (uint256 i = 0; i < length; i++) {
-            if (
-                IERC1155(badgeContract).balanceOf(
-                    account,
-                    allowedBadgeIds[i]
-                ) == 0
-            ) {
-                return 0;
-            }
+            total += IERC1155(badgeContract).balanceOf(account, allowedBadgeIds[i]);
         }
-        return 1;
+        return total;
     }
 
     /**
