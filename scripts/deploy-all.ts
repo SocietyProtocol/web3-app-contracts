@@ -9,6 +9,8 @@ interface DeploymentResult {
     wrapperImpl: string;
     factoryProxy: string;
     factoryImpl: string;
+    registryProxy: string;
+    registryImpl: string;
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -95,6 +97,24 @@ async function deployWrapperImpl(): Promise<{ contract: any; address: string }> 
     return { contract, address };
 }
 
+async function deployCommunityRegistry(
+    badgesAddress: string,
+    factoryAddress: string,
+    deployerAddress: string
+): Promise<{ contract: any; address: string }> {
+    console.log("\n[CommunityRegistry] Deploying UUPS proxy...");
+    const Registry = await ethers.getContractFactory("CommunityRegistry");
+    const contract = await upgrades.deployProxy(
+        Registry,
+        [badgesAddress, factoryAddress, deployerAddress],
+        { initializer: "initialize", kind: "uups" }
+    );
+    await contract.waitForDeployment();
+    const address = await contract.getAddress();
+    console.log(`[CommunityRegistry] Proxy deployed to: ${address}`);
+    return { contract, address };
+}
+
 async function deployWrapperFactory(
     badgesAddress: string,
     wrapperImplAddress: string,
@@ -127,6 +147,8 @@ function printSummary(result: DeploymentResult): void {
         ["CommunityWrapper (impl)",         result.wrapperImpl],
         ["CommunityWrapperFactory (proxy)", result.factoryProxy],
         ["CommunityWrapperFactory (impl)",  result.factoryImpl],
+        ["CommunityRegistry (proxy)",       result.registryProxy],
+        ["CommunityRegistry (impl)",        result.registryImpl],
     ];
 
     const labelWidth = Math.max(...rows.map(([l]) => l.length)) + 2;
@@ -157,6 +179,16 @@ async function main(): Promise<void> {
     // Step 4: Deploy CommunityWrapperFactory
     const factory = await deployWrapperFactory(badges.address, wrapperImpl.address, deployer.address);
 
+    // Step 5: Deploy CommunityRegistry
+    const registry = await deployCommunityRegistry(badges.address, factory.address, deployer.address);
+
+    // Step 6: Grant COMMUNITY_MANAGER_ROLE on badges to registry
+    console.log("\n[SocietyProtocolBadges] Granting COMMUNITY_MANAGER_ROLE to CommunityRegistry...");
+    const COMMUNITY_MANAGER_ROLE = await (badges.contract as any).COMMUNITY_MANAGER_ROLE();
+    const grantTx = await (badges.contract as any).grantRole(COMMUNITY_MANAGER_ROLE, registry.address);
+    await grantTx.wait();
+    console.log("[SocietyProtocolBadges] COMMUNITY_MANAGER_ROLE granted.");
+
     const result: DeploymentResult = {
         specToken: specToken.address,
         badgesProxy: badges.address,
@@ -164,9 +196,11 @@ async function main(): Promise<void> {
         wrapperImpl: wrapperImpl.address,
         factoryProxy: factory.address,
         factoryImpl: await upgrades.erc1967.getImplementationAddress(factory.address),
+        registryProxy: registry.address,
+        registryImpl: await upgrades.erc1967.getImplementationAddress(registry.address),
     };
 
-    // Step 5: Verify on live networks
+    // Step 7: Verify on live networks
     if (live) {
         console.log("\n[Verify] Starting contract verification...");
 
@@ -174,9 +208,10 @@ async function main(): Promise<void> {
         result.badgesImpl = await verifyProxy("[SocietyProtocolBadges]", badges.contract);
         await verifyPlain("[CommunityWrapper]", wrapperImpl.contract, []);
         result.factoryImpl = await verifyProxy("[CommunityWrapperFactory]", factory.contract);
+        result.registryImpl = await verifyProxy("[CommunityRegistry]", registry.contract);
     }
 
-    // Step 6: Print summary
+    // Step 8: Print summary
     printSummary(result);
 }
 
