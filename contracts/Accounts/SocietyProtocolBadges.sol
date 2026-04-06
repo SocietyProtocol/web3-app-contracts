@@ -29,6 +29,9 @@ contract SocietyProtocolBadges is
     /// @notice Role required to authorize contract upgrades.
     bytes32 public constant CONTRACT_UPGRADER_ROLE =
         keccak256("CONTRACT_UPGRADER_ROLE");
+    /// @notice Role granted to CommunityRegistry, allowing it to create community badges and perform privileged mints.
+    bytes32 public constant COMMUNITY_MANAGER_ROLE =
+        keccak256("COMMUNITY_MANAGER_ROLE");
 
     /// @notice Permission type: Only the recipient can perform the action (e.g., self-minting).
     uint256 public constant PERM_SELF = 1;
@@ -232,7 +235,14 @@ contract SocietyProtocolBadges is
                 );
             }
         }
-        // Anyone can create a badge
+        if (isCommunity) {
+            if (!hasRole(COMMUNITY_MANAGER_ROLE, msg.sender)) {
+                revert AccessControlUnauthorizedAccount(
+                    msg.sender,
+                    COMMUNITY_MANAGER_ROLE
+                );
+            }
+        }
         return
             _createBadge(
                 name,
@@ -681,7 +691,8 @@ contract SocietyProtocolBadges is
                     rules = canTransfer[id];
                 }
 
-                bool allowed = false;
+                // CommunityRegistry can mint any community badge without permission checks
+                bool allowed = from == address(0) && hasRole(COMMUNITY_MANAGER_ROLE, msg.sender);
                 for (uint256 j = 0; j < rules.length; j++) {
                     uint256 rule = rules[j];
 
