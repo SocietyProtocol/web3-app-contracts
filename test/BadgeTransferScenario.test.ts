@@ -28,7 +28,7 @@ describe("Badge Transfer & Burn Scenario (Overridden Approvals)", function () {
         await badges.connect(user1).createBadge(
             "Badge A (Non-transferable/Non-burnable)",
             false,
-            true,
+            false,
             ethers.ZeroAddress,
             "ipfs://badgeA",
             [PERM_EVERYONE], // Mint
@@ -42,7 +42,7 @@ describe("Badge Transfer & Burn Scenario (Overridden Approvals)", function () {
         await badges.connect(user1).createBadge(
             "Badge B (Transfer Gated by Badge A)",
             false,
-            true,
+            false,
             ethers.ZeroAddress,
             "ipfs://badgeB",
             [PERM_EVERYONE], // Mint
@@ -56,7 +56,7 @@ describe("Badge Transfer & Burn Scenario (Overridden Approvals)", function () {
         await badges.connect(user1).createBadge(
             "Badge C (Burn Gated by Badge A)",
             false,
-            true,
+            false,
             ethers.ZeroAddress,
             "ipfs://badgeC",
             [PERM_EVERYONE], // Mint
@@ -128,7 +128,7 @@ describe("Badge Transfer & Burn Scenario (Overridden Approvals)", function () {
             await badges.connect(user1).createBadge(
                 "Badge D (Burn Gated by A)",
                 false,
-                true,
+                false,
                 ethers.ZeroAddress,
                 "ipfs://badgeD",
                 [PERM_EVERYONE], [], [badgeA], [user1.address]

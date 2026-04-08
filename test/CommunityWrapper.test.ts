@@ -184,6 +184,33 @@ describe("CommunityWrapper and Upgradeable Factory", function () {
                 .to.be.revertedWithCustomError(wrapper, "BadgeAlreadyAdded");
         });
 
+        it("Should deduplicate badge IDs passed to initialize", async function () {
+            // Create wrapper with duplicate IDs in the initial list
+            const tx = await factory.connect(creator).createWrapper("Dedup", "DDP", [ID1, ID1, ID1]);
+            const receipt = await tx.wait();
+            const event = receipt?.logs.find((log: any) => log.fragment?.name === 'WrapperDeployed') as any;
+            const dedupWrapper = await ethers.getContractAt("CommunityWrapper", event.args[0]);
+
+            const ids = await dedupWrapper.getAllowedBadgeIds();
+            expect(ids.length).to.equal(1);
+            expect(ids[0]).to.equal(ID1);
+        });
+
+        it("Should not double-count balance when initialized with duplicate badge IDs", async function () {
+            // Create badge ID1 with PERM_EVERYONE minting, then mint 1 to user1
+            await badges.createBadge("Badge 1", false, false, ethers.ZeroAddress, "uri1", [PERM_EVERYONE], [], [], []);
+            await badges.connect(user1).mint(user1.address, ID1, 1, "0x");
+
+            // Create wrapper with ID1 listed twice
+            const tx = await factory.connect(creator).createWrapper("DoubleCount", "DC", [ID1, ID1]);
+            const receipt = await tx.wait();
+            const event = receipt?.logs.find((log: any) => log.fragment?.name === 'WrapperDeployed') as any;
+            const dcWrapper = await ethers.getContractAt("CommunityWrapper", event.args[0]);
+
+            // Balance should be 1, not 2
+            expect(await dcWrapper.balanceOf(user1.address)).to.equal(1);
+        });
+
         it("Should revert when removing a non-existent badge ID", async function () {
             await expect(wrapper.connect(creator).removeBadgeId(ID2))
                 .to.be.revertedWithCustomError(wrapper, "BadgeNotFound");

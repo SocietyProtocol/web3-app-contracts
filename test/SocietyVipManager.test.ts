@@ -53,20 +53,20 @@ describe("Society VIP Manager", function () {
         const goldEvent = goldReceipt?.logs.find((l: any) => l.fragment && l.fragment.name === 'BadgeCreated') as any;
         const goldBadgeId = goldEvent?.args[0];
 
-        // 5. Deploy VIP Manager and initialize with the pre-created badge IDs
+        // 5. Deploy VIP Manager with badge IDs and tier amounts in one call
         const VipManager = await ethers.getContractFactory("SocietyVipManager");
         vipManager = (await upgrades.deployProxy(VipManager, [
             await stakingToken.getAddress(),
             bronzeBadgeId,
             silverBadgeId,
             goldBadgeId,
+            BRONZE_AMOUNT,
+            SILVER_AMOUNT,
+            GOLD_AMOUNT,
         ], { initializer: 'initialize' })) as unknown as SocietyVipManager;
         await vipManager.waitForDeployment();
 
-        // 6. Set Tier Amounts post-initialization
-        await (await vipManager.setTierAmounts(BRONZE_AMOUNT, SILVER_AMOUNT, GOLD_AMOUNT)).wait();
-
-        // 7. Wire up the hooks on each badge to point to VIP Manager
+        // 6. Wire up the hooks on each badge to point to VIP Manager
         const vipManagerAddress = await vipManager.getAddress();
         await badges.setBadgeHook(bronzeBadgeId, vipManagerAddress);
         await badges.setBadgeHook(silverBadgeId, vipManagerAddress);
@@ -203,7 +203,7 @@ describe("Society VIP Manager", function () {
             const rules: any[] = [1]; // PERM_SELF
             const editors = [owner.address];
 
-            const tx = await badges.createBadge("Fallback Test", false, true, ethers.ZeroAddress, "ipfs://fallback", rules, rules, rules, editors);
+            const tx = await badges.createBadge("Fallback Test", false, false, ethers.ZeroAddress, "ipfs://fallback", rules, rules, rules, editors);
             const receipt = await tx.wait();
             const event = receipt?.logs.find((l: any) => l.fragment && l.fragment.name === 'BadgeCreated') as any;
             const badgeId = event?.args[0];
@@ -233,6 +233,132 @@ describe("Society VIP Manager", function () {
 
             await expect(proxy.connect(user1).upgradeToAndCall(newImpl, "0x"))
                 .to.be.reverted; // usually reverted with Ownable error or custom error if we used it
+        });
+    });
+
+    // -------------------------------------------------------------------------
+    // Community Tiers
+    // -------------------------------------------------------------------------
+
+    describe("Community Tiers", function () {
+        // Tier level constants (owner-defined identifiers, not badge IDs)
+        const BRONZE = 1n;
+        const SILVER = 2n;
+        const GOLD   = 3n;
+        const ONE_YEAR = 365 * 24 * 60 * 60;
+
+        let communityId: bigint;  // the creator badge ID acting as the community identifier
+        let creator: any;
+
+        beforeEach(async function () {
+            [, , , creator] = await ethers.getSigners();
+
+            // Create a community creator badge (PERM_EVERYONE mint, PERM_SELF transfer)
+            const tx = await badges.createBadge(
+                "Test Community Creator", true, false, ethers.ZeroAddress, "",
+                [2n], [1n], [], [owner.address]
+            );
+            const receipt = await tx.wait();
+            const event = receipt?.logs.find((l: any) => l.fragment?.name === 'BadgeCreated') as any;
+            communityId = event?.args[0];
+            await badges.mint(creator.address, communityId, 1, "0x");
+        });
+
+        it("getCommunityTier returns (0, 0) when no grant exists", async function () {
+            const [tierId, expiry] = await vipManager.getCommunityTier(communityId);
+            expect(tierId).to.equal(0);
+            expect(expiry).to.equal(0);
+        });
+
+        it("owner can grant a tier and getCommunityTier reflects it", async function () {
+            await vipManager.grantCommunityTier(communityId, BRONZE, ONE_YEAR);
+            const [tierId, expiry] = await vipManager.getCommunityTier(communityId);
+            expect(tierId).to.equal(BRONZE);
+            expect(expiry).to.be.gt(0);
+        });
+
+        it("non-owner cannot grant a tier", async function () {
+            await expect(
+                vipManager.connect(user1).grantCommunityTier(communityId, BRONZE, ONE_YEAR)
+            ).to.be.revertedWithCustomError(vipManager, "OwnableUnauthorizedAccount");
+        });
+
+        it("reverts with InvalidTierAmounts when tierId is 0", async function () {
+            await expect(
+                vipManager.grantCommunityTier(communityId, 0, ONE_YEAR)
+            ).to.be.revertedWithCustomError(vipManager, "InvalidTierAmounts");
+        });
+
+        it("reverts with LockDurationTooShort when duration is 0", async function () {
+            await expect(
+                vipManager.grantCommunityTier(communityId, BRONZE, 0)
+            ).to.be.revertedWithCustomError(vipManager, "LockDurationTooShort");
+        });
+
+        it("getCommunityTier returns (0, 0) after grant expires", async function () {
+            await vipManager.grantCommunityTier(communityId, BRONZE, ONE_YEAR);
+            await time.increase(ONE_YEAR + 1);
+            const [tierId] = await vipManager.getCommunityTier(communityId);
+            expect(tierId).to.equal(0);
+        });
+
+        it("overwriting a grant replaces the tier", async function () {
+            await vipManager.grantCommunityTier(communityId, BRONZE, ONE_YEAR);
+            await vipManager.grantCommunityTier(communityId, SILVER, ONE_YEAR);
+            const [tierId] = await vipManager.getCommunityTier(communityId);
+            expect(tierId).to.equal(SILVER);
+        });
+
+        it("owner can revoke a tier; getCommunityTier immediately returns (0, 0)", async function () {
+            await vipManager.grantCommunityTier(communityId, BRONZE, ONE_YEAR);
+            await vipManager.revokeCommunityTier(communityId);
+            const [tierId] = await vipManager.getCommunityTier(communityId);
+            expect(tierId).to.equal(0);
+        });
+
+        it("non-owner cannot revoke a tier", async function () {
+            await vipManager.grantCommunityTier(communityId, BRONZE, ONE_YEAR);
+            await expect(
+                vipManager.connect(user1).revokeCommunityTier(communityId)
+            ).to.be.revertedWithCustomError(vipManager, "OwnableUnauthorizedAccount");
+        });
+
+        it("revoking a never-granted community is a no-op", async function () {
+            await vipManager.grantCommunityTier(communityId, BRONZE, ONE_YEAR);
+            await expect(vipManager.revokeCommunityTier(9999n)).to.not.be.reverted;
+            const [tierId] = await vipManager.getCommunityTier(communityId);
+            expect(tierId).to.equal(BRONZE);  // real grant untouched
+        });
+
+        it("revoking an already-revoked community is a no-op", async function () {
+            await vipManager.grantCommunityTier(communityId, BRONZE, ONE_YEAR);
+            await vipManager.revokeCommunityTier(communityId);
+            await expect(vipManager.revokeCommunityTier(communityId)).to.not.be.reverted;
+        });
+
+        it("two communities hold different tiers independently", async function () {
+            const tx2 = await badges.createBadge("Community 2", true, false, ethers.ZeroAddress, "", [2n], [1n], [], [owner.address]);
+            const receipt2 = await tx2.wait();
+            const event2 = receipt2?.logs.find((l: any) => l.fragment?.name === 'BadgeCreated') as any;
+            const community2Id = event2?.args[0];
+
+            await vipManager.grantCommunityTier(communityId,   BRONZE, ONE_YEAR);
+            await vipManager.grantCommunityTier(community2Id, GOLD,   ONE_YEAR);
+
+            const [tier1] = await vipManager.getCommunityTier(communityId);
+            const [tier2] = await vipManager.getCommunityTier(community2Id);
+            expect(tier1).to.equal(BRONZE);
+            expect(tier2).to.equal(GOLD);
+        });
+
+        it("staking tiers are unaffected by community tier operations", async function () {
+            const bronzeId = await vipManager.bronzeBadgeId();
+            await vipManager.connect(user1).lock(BRONZE_AMOUNT, ONE_MONTH);
+            expect(await badges.balanceOf(user1.address, bronzeId)).to.equal(1);
+
+            await vipManager.grantCommunityTier(communityId, BRONZE, ONE_YEAR);
+            // staking balance unchanged
+            expect(await badges.balanceOf(user1.address, bronzeId)).to.equal(1);
         });
     });
 });
