@@ -10,8 +10,12 @@ import "./ISocietyBadgeHook.sol";
 
 /**
  * @title Society VIP Manager
- * @notice Manages VIP tiers (Bronze, Silver, Gold) via staking.
- * @dev Implements ISocietyBadgeHook to provide dynamic ownership of VIP badges based on locked amounts.
+ * @notice Manages personal VIP tiers (Bronze, Silver, Gold) via staking, and community tiers via
+ *         owner-granted time-limited grants.
+ * @dev Implements ISocietyBadgeHook for personal VIP badges only.
+ *      Community tiers are stored in a plain mapping and queried via getCommunityTier(communityId).
+ *      To check whether a specific address holds a community tier, call getCommunityTier(communityId)
+ *      and verify they hold the creator badge via badges.balanceOf(account, communityId) > 0.
  */
 contract SocietyVipManager is
     Initializable,
@@ -20,6 +24,10 @@ contract SocietyVipManager is
     ISocietyBadgeHook
 {
     using SafeERC20 for IERC20;
+
+    // -------------------------------------------------------------------------
+    // Personal VIP state
+    // -------------------------------------------------------------------------
 
     /// @notice The ERC20 token used for staking.
     IERC20 public stakingToken;
@@ -54,6 +62,27 @@ contract SocietyVipManager is
     /// @notice Maps user addresses to their corresponding lock information.
     mapping(address => LockInfo) public locks;
 
+    // -------------------------------------------------------------------------
+    // Community tier state
+    // -------------------------------------------------------------------------
+
+    /**
+     * @dev Stores an owner-granted community tier.
+     * @param tierId An owner-defined tier identifier (e.g. 1 = Bronze, 2 = Silver, 3 = Gold).
+     * @param expiry Unix timestamp after which the tier is no longer active.
+     */
+    struct CommunityTierGrant {
+        uint256 tierId;
+        uint256 expiry;
+    }
+
+    /// @notice communityId (= creator badge ID) => active community tier grant.
+    mapping(uint256 => CommunityTierGrant) public communityTiers;
+
+    // -------------------------------------------------------------------------
+    // Errors
+    // -------------------------------------------------------------------------
+
     /// @notice Error thrown when the staking amount is less than the bronze tier requirement.
     error InsufficientAmount();
     /// @notice Error thrown when the requested lock duration is shorter than the minimum allowed.
@@ -67,30 +96,21 @@ contract SocietyVipManager is
     /// @notice Error thrown when tier amounts are zero or not strictly increasing.
     error InvalidTierAmounts();
 
-    /**
-     * @notice Emitted when tokens are locked by a user.
-     * @param user The address of the user who locked tokens.
-     * @param amount The amount of tokens locked.
-     * @param unlockTime The timestamp when the lock will expire.
-     */
-    event TokensLocked(
-        address indexed user,
-        uint256 amount,
-        uint256 unlockTime
-    );
-    /**
-     * @notice Emitted when tokens are unlocked by a user.
-     * @param user The address of the user who unlocked tokens.
-     * @param amount The amount of tokens unlocked.
-     */
+    // -------------------------------------------------------------------------
+    // Events
+    // -------------------------------------------------------------------------
+
+    event TokensLocked(address indexed user, uint256 amount, uint256 unlockTime);
     event TokensUnlocked(address indexed user, uint256 amount);
-    /**
-     * @notice Emitted when the staking amounts for tiers are updated by the owner.
-     * @param bronze The new amount for the Bronze tier.
-     * @param silver The new amount for the Silver tier.
-     * @param gold The new amount for the Gold tier.
-     */
     event AmountsUpdated(uint256 bronze, uint256 silver, uint256 gold);
+    /// @notice Emitted when a community tier grant is created or overwritten.
+    event CommunityTierGranted(uint256 indexed communityId, uint256 tierId, uint256 expiry);
+    /// @notice Emitted when a community tier grant is revoked before expiry.
+    event CommunityTierRevoked(uint256 indexed communityId);
+
+    // -------------------------------------------------------------------------
+    // Constructor / Initializer
+    // -------------------------------------------------------------------------
 
     /// @custom:oz-upgrades-unsafe-allow constructor
     constructor() {
@@ -126,19 +146,19 @@ contract SocietyVipManager is
 
         bronzeBadgeId = _bronzeBadgeId;
         silverBadgeId = _silverBadgeId;
-        goldBadgeId = _goldBadgeId;
+        goldBadgeId   = _goldBadgeId;
 
         bronzeAmount = _bronzeAmount;
         silverAmount = _silverAmount;
-        goldAmount = _goldAmount;
+        goldAmount   = _goldAmount;
     }
+
+    // -------------------------------------------------------------------------
+    // Personal VIP — staking
+    // -------------------------------------------------------------------------
 
     /**
      * @notice Updates the required amounts for each VIP tier.
-     * @dev Only callable by the contract owner.
-     * @param _bronze The new Bronze tier required amount.
-     * @param _silver The new Silver tier required amount.
-     * @param _gold The new Gold tier required amount.
      */
     function setTierAmounts(
         uint256 _bronze,
@@ -148,19 +168,13 @@ contract SocietyVipManager is
         if (_bronze == 0 || _silver < _bronze || _gold < _silver) revert InvalidTierAmounts();
         bronzeAmount = _bronze;
         silverAmount = _silver;
-        goldAmount = _gold;
+        goldAmount   = _gold;
         emit AmountsUpdated(_bronze, _silver, _gold);
     }
-
-    function _authorizeUpgrade(
-        address newImplementation
-    ) internal override onlyOwner {}
 
     /**
      * @notice Locks tokens into a VIP tier for a specified duration.
      * @dev Extends existing lock time if the new unlockTime is further in the future.
-     * @param amount The amount of stakingToken to lock.
-     * @param duration The duration for which the tokens will be locked.
      */
     function lock(uint256 amount, uint256 duration) external {
         if (amount < bronzeAmount) revert InsufficientAmount();
@@ -168,16 +182,14 @@ contract SocietyVipManager is
 
         LockInfo storage userLock = locks[msg.sender];
 
-        // If they already have a lock, they can add to it or extend it
         if (userLock.amount > 0 && block.timestamp < userLock.unlockTime) {
-            // Adding to existing lock
             userLock.amount += amount;
             uint256 newUnlockTime = block.timestamp + duration;
             if (newUnlockTime > userLock.unlockTime) {
                 userLock.unlockTime = newUnlockTime;
             }
         } else {
-            // New lock or expired lock — start fresh, don't accumulate old expired tokens
+            // New lock or expired lock — start fresh
             userLock.amount = amount;
             userLock.unlockTime = block.timestamp + duration;
         }
@@ -202,75 +214,96 @@ contract SocietyVipManager is
         emit TokensUnlocked(msg.sender, amount);
     }
 
-    // --- ISocietyBadgeHook ---
+    // -------------------------------------------------------------------------
+    // Community tier management
+    // -------------------------------------------------------------------------
 
     /**
-     * @notice Implementation of `onCheckMint` for dynamic badges.
-     * @dev VIP tier badges cannot be minted directly; they are earned by staking. Always returns false.
+     * @notice Grants a community tier to a community for a fixed duration.
+     * @dev Only the contract owner can call this. Overwrites any existing grant.
+     *      Community tier ownership is not expressed as an ERC1155 badge balance — use
+     *      getCommunityTier(communityId) to read the tier and verify creator-badge ownership
+     *      separately via badges.balanceOf(account, communityId) > 0.
+     * @param communityId The community's identifier (= creator badge ID).
+     * @param tierId An identifier for the tier level (e.g. 1 = Bronze, 2 = Silver, 3 = Gold).
+     * @param duration Duration in seconds before the tier expires.
      */
-    function onCheckMint(
-        address,
-        address,
-        uint256,
-        uint256
-    ) external pure returns (bool) {
+    function grantCommunityTier(
+        uint256 communityId,
+        uint256 tierId,
+        uint256 duration
+    ) external onlyOwner {
+        if (tierId == 0) revert InvalidTierAmounts();
+        if (duration == 0) revert LockDurationTooShort();
+
+        uint256 expiry = block.timestamp + duration;
+        communityTiers[communityId] = CommunityTierGrant({ tierId: tierId, expiry: expiry });
+        emit CommunityTierGranted(communityId, tierId, expiry);
+    }
+
+    /**
+     * @notice Revokes an active community tier grant immediately.
+     * @dev No-ops silently if the community has no active grant.
+     * @param communityId The community whose tier is being revoked.
+     */
+    function revokeCommunityTier(uint256 communityId) external onlyOwner {
+        if (communityTiers[communityId].expiry == 0) return;
+        delete communityTiers[communityId];
+        emit CommunityTierRevoked(communityId);
+    }
+
+    /**
+     * @notice Returns the active community tier for a given community.
+     * @dev Returns (0, 0) if the community has no grant or the grant has expired.
+     *      Pair with badges.balanceOf(account, communityId) > 0 to confirm the queried
+     *      address currently holds the creator badge.
+     * @param communityId The community to query (= creator badge ID).
+     * @return tierId The active tier identifier, or 0 if none.
+     * @return expiry The unix timestamp when the tier expires, or 0 if none.
+     */
+    function getCommunityTier(uint256 communityId) external view returns (uint256 tierId, uint256 expiry) {
+        CommunityTierGrant storage g = communityTiers[communityId];
+        if (g.expiry == 0 || block.timestamp >= g.expiry) return (0, 0);
+        return (g.tierId, g.expiry);
+    }
+
+    // -------------------------------------------------------------------------
+    // ISocietyBadgeHook — personal VIP only
+    // -------------------------------------------------------------------------
+
+    /// @dev VIP badges cannot be minted directly. Always returns false.
+    function onCheckMint(address, address, uint256, uint256) external pure returns (bool) {
+        return false;
+    }
+
+    /// @dev VIP badges are non-transferable. Always returns false.
+    function onCheckTransfer(address, address, address, uint256, uint256) external pure returns (bool) {
+        return false;
+    }
+
+    /// @dev VIP badges are not burnable directly. Always returns false.
+    function onCheckBurn(address, address, uint256, uint256) external pure returns (bool) {
         return false;
     }
 
     /**
-     * @notice Implementation of `onCheckTransfer` for dynamic badges.
-     * @dev VIP tier badges are non-transferable. Always returns false.
+     * @notice Returns 1 if the account holds the personal VIP badge based on their staked amount.
+     * @dev Community tier badges are not routed through this hook — use getCommunityTier instead.
      */
-    function onCheckTransfer(
-        address,
-        address,
-        address,
-        uint256,
-        uint256
-    ) external pure returns (bool) {
-        return false;
-    }
-
-    /**
-     * @notice Implementation of `onCheckBurn` for dynamic badges.
-     * @dev VIP tier badges are not burnable in the standard sense. Always returns false.
-     */
-    function onCheckBurn(
-        address,
-        address,
-        uint256,
-        uint256
-    ) external pure returns (bool) {
-        return false;
-    }
-
-    /**
-     * @notice Implementation of `onBalanceOf` to determine tiered badge ownership.
-     * @dev Returns 1 if the `account` has locked enough tokens for the tier and the lock hasn't expired.
-     * @param account The address querying ownership.
-     * @param id The badge ID assigned to the VIP tier.
-     * @return 1 if the user owns the badge, 0 otherwise.
-     */
-    function onBalanceOf(
-        address account,
-        uint256 id
-    ) external view returns (uint256) {
+    function onBalanceOf(address account, uint256 id) external view returns (uint256) {
         LockInfo storage userLock = locks[account];
+        if (block.timestamp >= userLock.unlockTime || userLock.amount == 0) return 0;
 
-        // If lock expired, balance is 0
-        if (block.timestamp >= userLock.unlockTime || userLock.amount == 0) {
-            return 0;
-        }
-
-        // Tier logic: higher tier locks are inclusive of the lower ones.
-        if (id == goldBadgeId) {
-            return userLock.amount >= goldAmount ? 1 : 0;
-        } else if (id == silverBadgeId) {
-            return userLock.amount >= silverAmount ? 1 : 0;
-        } else if (id == bronzeBadgeId) {
-            return userLock.amount >= bronzeAmount ? 1 : 0;
-        }
+        if (id == goldBadgeId)   return userLock.amount >= goldAmount   ? 1 : 0;
+        if (id == silverBadgeId) return userLock.amount >= silverAmount ? 1 : 0;
+        if (id == bronzeBadgeId) return userLock.amount >= bronzeAmount ? 1 : 0;
 
         return 0;
     }
+
+    // -------------------------------------------------------------------------
+    // Admin
+    // -------------------------------------------------------------------------
+
+    function _authorizeUpgrade(address newImplementation) internal override onlyOwner {}
 }
