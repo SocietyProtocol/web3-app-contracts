@@ -70,7 +70,23 @@ describe("Society Protocol Badges (Upgradeable) - Refactored", function () {
             expect(await badges.canEdit(id, creator.address)).to.be.true;
         });
 
-        it("Anyone should be able to create community badges", async function () {
+        it("Only COMMUNITY_MANAGER_ROLE can create community badges", async function () {
+            const COMMUNITY_MANAGER_ROLE = await badges.COMMUNITY_MANAGER_ROLE();
+
+            // user1 without the role is rejected
+            await expect(
+                badges.connect(user1).createBadge(
+                    "Public Badge",
+                    false,
+                    true,
+                    ethers.ZeroAddress,
+                    "ipfs://public",
+                    [], [], [], [user1.address]
+                )
+            ).to.be.revertedWithCustomError(badges, "AccessControlUnauthorizedAccount");
+
+            // After granting the role, creation succeeds
+            await badges.grantRole(COMMUNITY_MANAGER_ROLE, user1.address);
             await badges.connect(user1).createBadge(
                 "Public Badge",
                 false,
@@ -82,7 +98,7 @@ describe("Society Protocol Badges (Upgradeable) - Refactored", function () {
             const id = STARTING_BADGE_ID + 1n;
             const badge = await badges.badges(id);
             expect(badge.name).to.equal("Public Badge");
-            expect(badge.isOfficial).to.be.false;
+            expect(badge.isCommunity).to.be.true;
         });
 
         it("Non-official creator should NOT be able to create official badges", async function () {
@@ -140,7 +156,7 @@ describe("Society Protocol Badges (Upgradeable) - Refactored", function () {
         });
 
         it("Editor should be able to modify badge", async function () {
-            await badges.connect(creator).modifyBadge(badgeId, "Edited", true, true, "ipfs://new");
+            await badges.connect(creator).modifyBadge(badgeId, "Edited", true, "ipfs://new");
             const badge = await badges.badges(badgeId);
             expect(badge.name).to.equal("Edited");
             expect(badge.isOfficial).to.be.true;
@@ -148,7 +164,7 @@ describe("Society Protocol Badges (Upgradeable) - Refactored", function () {
 
         it("Non-editor should NOT be able to modify badge", async function () {
             await expect(
-                badges.connect(user1).modifyBadge(badgeId, "Hacked", false, false, "ipfs://hacked")
+                badges.connect(user1).modifyBadge(badgeId, "Hacked", false, "ipfs://hacked")
             ).to.be.revertedWithCustomError(badges, "Unauthorized");
         });
 
@@ -246,21 +262,21 @@ describe("Society Protocol Badges (Upgradeable) - Refactored", function () {
 
     describe("Security & Official Status", function () {
         it("Should only allow OFFICIAL_BADGE_CREATOR_ROLE to promote a badge to official", async function () {
-            await badges.createBadge("Community", false, true, ethers.ZeroAddress, "ipfs://1", [], [], [], [user1.address]);
+            await badges.createBadge("Community", false, false, ethers.ZeroAddress, "ipfs://1", [], [], [], [user1.address]);
             const id = STARTING_BADGE_ID + 1n;
 
             await expect(
-                badges.connect(user1).modifyBadge(id, "Community", true, true, "ipfs://1")
+                badges.connect(user1).modifyBadge(id, "Community", true, "ipfs://1")
             ).to.be.revertedWithCustomError(badges, "AccessControlUnauthorizedAccount");
 
             await expect(
-                badges.connect(creator).modifyBadge(id, "Community", true, true, "ipfs://1")
+                badges.connect(creator).modifyBadge(id, "Community", true, "ipfs://1")
             ).to.be.revertedWithCustomError(badges, "Unauthorized");
 
-            await badges.createBadge("For Promotion", false, true, ethers.ZeroAddress, "ipfs://2", [], [], [], [creator.address]);
+            await badges.createBadge("For Promotion", false, false, ethers.ZeroAddress, "ipfs://2", [], [], [], [creator.address]);
             const id2 = STARTING_BADGE_ID + 2n;
 
-            await expect(badges.connect(creator).modifyBadge(id2, "Now Official", true, true, "ipfs://2"))
+            await expect(badges.connect(creator).modifyBadge(id2, "Now Official", true, "ipfs://2"))
                 .to.emit(badges, "BadgeModified");
 
             const badge = await badges.badges(id2);
@@ -272,10 +288,10 @@ describe("Society Protocol Badges (Upgradeable) - Refactored", function () {
             const id = STARTING_BADGE_ID + 1n;
 
             await expect(
-                badges.connect(user1).modifyBadge(id, "Official", false, true, "ipfs://3")
+                badges.connect(user1).modifyBadge(id, "Official", false, "ipfs://3")
             ).to.be.revertedWithCustomError(badges, "AccessControlUnauthorizedAccount");
 
-            await expect(badges.connect(creator).modifyBadge(id, "Demoted", false, true, "ipfs://3"))
+            await expect(badges.connect(creator).modifyBadge(id, "Demoted", false, "ipfs://3"))
                 .to.emit(badges, "BadgeModified");
 
             const badge = await badges.badges(id);
@@ -334,9 +350,9 @@ describe("Society Protocol Badges (Upgradeable) - Refactored", function () {
 
         beforeEach(async function () {
             // Create two public badges
-            await badges.createBadge("Badge1", false, true, ethers.ZeroAddress, "ipfs://1", [PERM_EVERYONE], [], [], [owner.address]);
+            await badges.createBadge("Badge1", false, false, ethers.ZeroAddress, "ipfs://1", [PERM_EVERYONE], [], [], [owner.address]);
             badge1 = STARTING_BADGE_ID + 1n;
-            await badges.createBadge("Badge2", false, true, ethers.ZeroAddress, "ipfs://2", [PERM_EVERYONE], [], [], [owner.address]);
+            await badges.createBadge("Badge2", false, false, ethers.ZeroAddress, "ipfs://2", [PERM_EVERYONE], [], [], [owner.address]);
             badge2 = STARTING_BADGE_ID + 2n;
         });
 
