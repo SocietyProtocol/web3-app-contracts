@@ -89,6 +89,9 @@ contract CommunityRegistry is Initializable, OwnableUpgradeable, UUPSUpgradeable
     /// @notice A CommunityWrapper has already been deployed for this community.
     error WrapperAlreadyDeployed();
 
+    /// @notice A zero address was provided where a valid address is required.
+    error InvalidAddress();
+
     // -------------------------------------------------------------------------
     // Constructor / Initializer
     // -------------------------------------------------------------------------
@@ -109,6 +112,8 @@ contract CommunityRegistry is Initializable, OwnableUpgradeable, UUPSUpgradeable
         address _wrapperFactory,
         address _owner
     ) public initializer {
+        if (_badges == address(0) || _wrapperFactory == address(0)) revert InvalidAddress();
+
         __Ownable_init(_owner);
         __UUPSUpgradeable_init();
 
@@ -245,27 +250,11 @@ contract CommunityRegistry is Initializable, OwnableUpgradeable, UUPSUpgradeable
         uint256[] calldata transferers,
         uint256[] calldata burners
     ) external onlyCreator(communityId) returns (uint256 badgeId) {
-        badgeId = _createAdditionalBadge(name, metadataURI, _toMemory(minters), _toMemory(transferers), _toMemory(burners));
-        _communityBadgeIds[communityId].push(badgeId);
-        emit CommunityBadgeCreated(communityId, badgeId);
-    }
-
-    /// @dev Copies a calldata uint256 array to memory (reduces stack slot usage at call sites).
-    function _toMemory(uint256[] calldata arr) internal pure returns (uint256[] memory out) {
-        out = arr;
-    }
-
-    /// @dev Wraps badges.createBadge for additional community badges, keeping the registry as editor.
-    function _createAdditionalBadge(
-        string memory name,
-        string memory metadataURI,
-        uint256[] memory minters,
-        uint256[] memory transferers,
-        uint256[] memory burners
-    ) internal returns (uint256) {
         address[] memory editors = new address[](1);
         editors[0] = address(this);
-        return badges.createBadge(name, false, true, address(0), metadataURI, minters, transferers, burners, editors);
+        badgeId = badges.createBadge(name, false, true, address(0), metadataURI, minters, transferers, burners, editors);
+        _communityBadgeIds[communityId].push(badgeId);
+        emit CommunityBadgeCreated(communityId, badgeId);
     }
 
     /**

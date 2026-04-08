@@ -62,6 +62,10 @@ contract SocietyVipManager is
     error LockStillActive();
     /// @notice Error thrown when a user attempts to unlock without having any tokens locked.
     error NoTokensLocked();
+    /// @notice Error thrown when a zero address is provided where a valid address is required.
+    error InvalidAddress();
+    /// @notice Error thrown when tier amounts are zero or not strictly increasing.
+    error InvalidTierAmounts();
 
     /**
      * @notice Emitted when tokens are locked by a user.
@@ -99,13 +103,23 @@ contract SocietyVipManager is
      * @param _bronzeBadgeId ID of the pre-created Bronze VIP badge.
      * @param _silverBadgeId ID of the pre-created Silver VIP badge.
      * @param _goldBadgeId ID of the pre-created Gold VIP badge.
+     * @param _bronzeAmount Minimum tokens required for Bronze tier.
+     * @param _silverAmount Minimum tokens required for Silver tier (must be >= bronze).
+     * @param _goldAmount Minimum tokens required for Gold tier (must be >= silver).
      */
     function initialize(
         address _stakingToken,
         uint256 _bronzeBadgeId,
         uint256 _silverBadgeId,
-        uint256 _goldBadgeId
+        uint256 _goldBadgeId,
+        uint256 _bronzeAmount,
+        uint256 _silverAmount,
+        uint256 _goldAmount
     ) public initializer {
+        if (_stakingToken == address(0)) revert InvalidAddress();
+        if (_bronzeAmount == 0 || _silverAmount < _bronzeAmount || _goldAmount < _silverAmount)
+            revert InvalidTierAmounts();
+
         __Ownable_init(msg.sender);
         __UUPSUpgradeable_init();
         stakingToken = IERC20(_stakingToken);
@@ -113,6 +127,10 @@ contract SocietyVipManager is
         bronzeBadgeId = _bronzeBadgeId;
         silverBadgeId = _silverBadgeId;
         goldBadgeId = _goldBadgeId;
+
+        bronzeAmount = _bronzeAmount;
+        silverAmount = _silverAmount;
+        goldAmount = _goldAmount;
     }
 
     /**
@@ -127,6 +145,7 @@ contract SocietyVipManager is
         uint256 _silver,
         uint256 _gold
     ) external onlyOwner {
+        if (_bronze == 0 || _silver < _bronze || _gold < _silver) revert InvalidTierAmounts();
         bronzeAmount = _bronze;
         silverAmount = _silver;
         goldAmount = _gold;
@@ -158,8 +177,8 @@ contract SocietyVipManager is
                 userLock.unlockTime = newUnlockTime;
             }
         } else {
-            // New lock or old one expired
-            userLock.amount += amount;
+            // New lock or expired lock — start fresh, don't accumulate old expired tokens
+            userLock.amount = amount;
             userLock.unlockTime = block.timestamp + duration;
         }
 

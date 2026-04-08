@@ -63,7 +63,16 @@ contract CommunityWrapper is
         if (_initialBadgeIds.length > MAX_BADGES) revert MaxBadgesReached();
 
         badgeContract = _badgeContract;
-        allowedBadgeIds = _initialBadgeIds;
+
+        // Deduplicate initial badge IDs (same logic as addBadgeId)
+        for (uint256 i = 0; i < _initialBadgeIds.length; i++) {
+            uint256 id = _initialBadgeIds[i];
+            bool found = false;
+            for (uint256 j = 0; j < allowedBadgeIds.length; j++) {
+                if (allowedBadgeIds[j] == id) { found = true; break; }
+            }
+            if (!found) allowedBadgeIds.push(id);
+        }
     }
 
     /**

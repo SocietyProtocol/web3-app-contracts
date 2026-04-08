@@ -100,6 +100,9 @@ contract SocietyProtocolBadges is
     /// @notice The ID that will be assigned to the next created badge.
     uint256 public nextTokenId;
 
+    /// @dev Tracks which badge IDs have been created. Used for existence checks.
+    mapping(uint256 => bool) private _badgeCreated;
+
     /**
      * @notice Emitted when a new badge type is created.
      * @param id The unique ID assigned to the new badge.
@@ -286,10 +289,9 @@ contract SocietyProtocolBadges is
 
         // Temporarily allow self-minting for the creation transaction
         canMint[pid].push(PERM_SELF);
+        profileBadgeId[msg.sender] = pid;   // set before _mint (CEI)
         _mint(msg.sender, pid, 1, "");
         canMint[pid].pop();
-
-        profileBadgeId[msg.sender] = pid;
         emit ProfileCreated(msg.sender, pid);
         return pid;
     }
@@ -310,6 +312,7 @@ contract SocietyProtocolBadges is
     ) internal returns (uint256) {
         nextTokenId++;
         uint256 id = nextTokenId;
+        _badgeCreated[id] = true;
 
         badges[id] = BadgeInfo({
             name: name,
@@ -350,17 +353,17 @@ contract SocietyProtocolBadges is
     }
 
     /**
-     * @notice Modifies a badge's name, type, and URI.
+     * @notice Modifies a badge's name, official status, and URI.
      * @dev Toggling official status requires `OFFICIAL_BADGE_CREATOR_ROLE`.
+     *      The `isCommunity` flag is immutable after badge creation.
      */
     function modifyBadge(
         uint256 id,
         string memory name,
         bool isOfficial,
-        bool isCommunity,
         string memory metadataURI
     ) external {
-        if (id > nextTokenId) revert BadgeDoesNotExist();
+        if (!_badgeCreated[id]) revert BadgeDoesNotExist();
 
         // Check edit permission
         if (!canEdit[id][msg.sender]) revert Unauthorized();
@@ -380,10 +383,9 @@ contract SocietyProtocolBadges is
 
         badge.name = name;
         badge.isOfficial = isOfficial;
-        badge.isCommunity = isCommunity;
         badge.metadataURI = metadataURI;
 
-        emit BadgeModified(id, name, isOfficial, isCommunity, metadataURI);
+        emit BadgeModified(id, name, isOfficial, badge.isCommunity, metadataURI);
         emit URI(metadataURI, id);
     }
 
@@ -396,7 +398,7 @@ contract SocietyProtocolBadges is
         uint256 amount,
         bytes memory data
     ) public {
-        if (id > nextTokenId) revert BadgeDoesNotExist();
+        if (!_badgeCreated[id]) revert BadgeDoesNotExist();
         // Permission check is done in _update
         _mint(to, id, amount, data);
     }
@@ -411,7 +413,7 @@ contract SocietyProtocolBadges is
         bytes memory data
     ) public {
         for (uint256 i = 0; i < ids.length; i++) {
-            if (ids[i] > nextTokenId) revert BadgeDoesNotExist();
+            if (!_badgeCreated[ids[i]]) revert BadgeDoesNotExist();
         }
         // Permission check is done in _update
         _mintBatch(to, ids, amounts, data);
@@ -453,7 +455,7 @@ contract SocietyProtocolBadges is
      * @notice Standard public burn function.
      */
     function burn(address from, uint256 id, uint256 value) public {
-        if (id > nextTokenId) revert BadgeDoesNotExist();
+        if (!_badgeCreated[id]) revert BadgeDoesNotExist();
         _burn(from, id, value);
     }
 
@@ -466,7 +468,7 @@ contract SocietyProtocolBadges is
         uint256[] memory values
     ) public {
         for (uint256 i = 0; i < ids.length; i++) {
-            if (ids[i] > nextTokenId) revert BadgeDoesNotExist();
+            if (!_badgeCreated[ids[i]]) revert BadgeDoesNotExist();
         }
         _burnBatch(from, ids, values);
     }
@@ -480,7 +482,7 @@ contract SocietyProtocolBadges is
         uint256 amount,
         bytes memory data
     ) public {
-        if (id > nextTokenId) revert BadgeDoesNotExist();
+        if (!_badgeCreated[id]) revert BadgeDoesNotExist();
         for (uint256 i = 0; i < to.length; i++) {
             // Permission check is done in _update for each mint
             _mint(to[i], id, amount, data);
@@ -691,8 +693,10 @@ contract SocietyProtocolBadges is
                     rules = canTransfer[id];
                 }
 
-                // CommunityRegistry can mint any community badge without permission checks
-                bool allowed = from == address(0) && hasRole(COMMUNITY_MANAGER_ROLE, msg.sender);
+                // CommunityRegistry can mint isCommunity badges without permission checks
+                bool allowed = from == address(0)
+                    && hasRole(COMMUNITY_MANAGER_ROLE, msg.sender)
+                    && badges[id].isCommunity;
                 for (uint256 j = 0; j < rules.length; j++) {
                     uint256 rule = rules[j];
 
