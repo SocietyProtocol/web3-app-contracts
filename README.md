@@ -6,10 +6,14 @@ Modular badge and community management system built with Solidity, Hardhat, and 
 
 The system consists of several core components designed for flexibility and upgradeability:
 
-1.  **SocietyProtocolBadges.sol**: Core ERC1155 system. Features UUPS upgradeability, detailed access control, and a "Hooks" system for custom mint/transfer/burn/balance logic.
-2.  **SocietyVipManager.sol**: Handles tier-based membership by locking staking tokens. It acts as a hook for its own VIP badges to prevent unauthorized transfers.
-3.  **CommunityWrapper.sol**: A non-transferable ERC20 wrapper that grants a balance based on holding specific ERC1155 badges.
-4.  **CommunityWrapperFactory.sol**: A factory using the Clones pattern to deploy `CommunityWrapper` instances efficiently.
+1.  **SocietyProtocolBadges.sol**: Core ERC1155 badge system. Features UUPS upgradeability, access control, and a hooks system for custom mint, transfer, burn, and balance logic.
+2.  **SocietyVipManager.sol**: Dynamic badge hook for personal VIP tiers based on staking and community VIP tiers based on owner-granted time-limited assignments.
+3.  **CommunityRegistry.sol**: Community management hub that creates communities, creator/member badges, and additional community badges.
+4.  **CommunityWrapper.sol**: A non-transferable ERC20 wrapper that derives balances from ERC1155 badges and is intended for Snapshot governance strategies.
+5.  **CommunityWrapperFactory.sol**: A factory using the Clones pattern to deploy `CommunityWrapper` instances efficiently.
+
+Detailed contract-by-contract notes are available in [docs/CONTRACTS.md](./docs/CONTRACTS.md).
+Deployment order and dependency notes are available in [docs/DEPLOYMENT.md](./docs/DEPLOYMENT.md).
 
 ## Prerequisites
 
@@ -36,7 +40,7 @@ npx hardhat compile
 ```
 
 ### Test
-Run the full test suite (over 70+ tests covering edge cases and security):
+Run the full test suite:
 ```bash
 npx hardhat test
 ```
@@ -51,17 +55,30 @@ npx hardhat run scripts/deploy-badges.ts --network <network>
 ```
 
 ### 2. Deploy VIP Manager
-Initialize the system with VIP tiers:
+Deploy the VIP manager and create/configure the personal VIP tier badges:
 ```bash
 STAKING_TOKEN_ADDRESS=0x... BADGES_CONTRACT_ADDRESS=0x... GOVERNOR_BADGE_ID=1 \
 npx hardhat run scripts/deploy-vip-manager.ts --network <network>
 ```
 
 ### 3. Deploy Community System
-Deploys the Factory and Implementation for ERC20 badge wrappers:
+Deploys the `CommunityWrapper` implementation and `CommunityWrapperFactory`:
 ```bash
 BADGES_CONTRACT_ADDRESS=0x... \
 npx hardhat run scripts/deploy-community-system.ts --network <network>
+```
+
+### 4. Deploy Community Registry
+Deploys `CommunityRegistry` and grants it `COMMUNITY_MANAGER_ROLE` on `SocietyProtocolBadges`:
+```bash
+BADGES_ADDRESS=0x... FACTORY_ADDRESS=0x... \
+npx hardhat run scripts/deploy-community-registry.ts --network <network>
+```
+
+### 5. Deploy Everything
+For a full deployment flow, use:
+```bash
+npx hardhat run scripts/deploy-all.ts --network <network>
 ```
 
 ## Upgrading Contracts
