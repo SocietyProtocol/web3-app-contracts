@@ -359,6 +359,37 @@ describe("Society Protocol Badges (Upgradeable) - Refactored", function () {
             await expect(badges.connect(user2).updateProfileURI(pid, "ipfs://p-hacked"))
                 .to.be.revertedWithCustomError(badges, "NotProfileOwner");
         });
+
+        it("Should REVERT when updateProfileURI is called with a non-profile badge ID", async function () {
+            // Create a regular badge with PERM_SELF so user1 can mint one copy (supply = 1)
+            const tx = await badges.createBadge(
+                "One-of-one", false, false, ethers.ZeroAddress, "ipfs://unique",
+                [1n], [], [], [owner.address]
+            );
+            const receipt = await tx.wait();
+            const event = receipt?.logs.find((l: any) => l.fragment?.name === "BadgeCreated") as any;
+            const badgeId = event?.args[0] as bigint;
+
+            await badges.connect(user1).mint(user1.address, badgeId, 1, "0x");
+
+            // user1 holds the only copy — but it is not their profile badge
+            await expect(badges.connect(user1).updateProfileURI(badgeId, "ipfs://hacked"))
+                .to.be.revertedWithCustomError(badges, "NotProfileOwner");
+        });
+
+        it("Should REVERT when updateProfileURI is called with a wrong profile badge ID", async function () {
+            await badges.connect(user1).createProfile("ipfs://p1");
+            await badges.connect(user2).createProfile("ipfs://p2");
+
+            const pid1 = await badges.profileBadgeId(user1.address);
+            const pid2 = await badges.profileBadgeId(user2.address);
+
+            // user1 cannot update user2's profile badge, and vice versa
+            await expect(badges.connect(user1).updateProfileURI(pid2, "ipfs://hacked"))
+                .to.be.revertedWithCustomError(badges, "NotProfileOwner");
+            await expect(badges.connect(user2).updateProfileURI(pid1, "ipfs://hacked"))
+                .to.be.revertedWithCustomError(badges, "NotProfileOwner");
+        });
     });
 
     describe("Upgradeability", function () {

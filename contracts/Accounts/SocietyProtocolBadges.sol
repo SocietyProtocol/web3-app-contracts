@@ -514,9 +514,7 @@ contract SocietyProtocolBadges is
      * @notice Specifically for profile badges, allows the user holding it to update their metadata link.
      */
     function updateProfileURI(uint256 id, string memory newUri) external {
-        // Allow update if sender owns the token and it's a unique NFT (Profile)
-        if (totalSupply(id) != 1 || balanceOf(msg.sender, id) != 1)
-            revert NotProfileOwner();
+        if (profileBadgeId[msg.sender] != id) revert NotProfileOwner();
 
         badges[id].metadataURI = newUri;
         emit URI(newUri, id);
