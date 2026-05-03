@@ -189,7 +189,7 @@ describe("Society Protocol Badges (Upgradeable) - Refactored", function () {
         it("Should emit BadgePermissions event on badge creation", async function () {
             const id = STARTING_BADGE_ID + 1n;
             const minters = [PERM_EVERYONE];
-            const transferers = [STARTING_BADGE_ID];
+            const transferers = [PERM_SELF];
             const burners = [] as bigint[];
             const editors = [creator.address, user1.address];
 
@@ -226,8 +226,8 @@ describe("Society Protocol Badges (Upgradeable) - Refactored", function () {
         });
 
         it("Should return correct permissions via getters", async function () {
-            const minters = [PERM_EVERYONE, STARTING_BADGE_ID];
-            const transferers = [STARTING_BADGE_ID];
+            const minters = [PERM_EVERYONE, PERM_SELF];
+            const transferers = [PERM_SELF];
             const burners = [PERM_EVERYONE];
             const editors = [owner.address, creator.address];
 
@@ -493,6 +493,73 @@ describe("Society Protocol Badges (Upgradeable) - Refactored", function () {
                 .to.be.revertedWithCustomError(badges, "BadgeDoesNotExist");
             await expect(badges.burn(user1.address, badId, 1))
                 .to.be.revertedWithCustomError(badges, "BadgeDoesNotExist");
+        });
+    });
+
+    describe("H04 — Permission Rule Validation & Hook-Aware balanceOf", function () {
+        it("Should revert createBadge if a minter rule references a non-existent badge ID", async function () {
+            const futureId = STARTING_BADGE_ID + 99n; // never created
+            await expect(
+                badges.createBadge("Bad Rules", false, false, ethers.ZeroAddress, "ipfs://bad",
+                    [futureId], [], [], [owner.address])
+            ).to.be.revertedWithCustomError(badges, "InvalidPermissionRule");
+        });
+
+        it("Should revert createBadge if a rule value is in the reserved range (3-9)", async function () {
+            const reservedId = 5n;
+            await expect(
+                badges.createBadge("Reserved Rule", false, false, ethers.ZeroAddress, "ipfs://r",
+                    [], [reservedId], [], [owner.address])
+            ).to.be.revertedWithCustomError(badges, "InvalidPermissionRule");
+        });
+
+        it("Should allow createBadge with PERM_SELF and PERM_EVERYONE rules", async function () {
+            await expect(
+                badges.createBadge("Open Badge", false, false, ethers.ZeroAddress, "ipfs://open",
+                    [PERM_EVERYONE], [PERM_SELF], [PERM_EVERYONE], [owner.address])
+            ).to.not.be.reverted;
+        });
+
+        it("Should allow createBadge using an existing badge ID as a rule", async function () {
+            // Create first badge
+            await badges.createBadge("Auth", false, false, ethers.ZeroAddress, "ipfs://a",
+                [PERM_EVERYONE], [], [], [owner.address]);
+            const authId = STARTING_BADGE_ID + 1n;
+
+            // Create second badge gated on the first
+            await expect(
+                badges.createBadge("Gated", false, false, ethers.ZeroAddress, "ipfs://g",
+                    [authId], [], [], [owner.address])
+            ).to.not.be.reverted;
+        });
+
+        it("Hook-inflated balanceOf should NOT grant badge-gated mint permission", async function () {
+            // Create auth badge
+            await badges.createBadge("Auth", false, false, ethers.ZeroAddress, "ipfs://auth",
+                [PERM_EVERYONE], [], [], [owner.address]);
+            const authId = STARTING_BADGE_ID + 1n;
+
+            // Create gated badge requiring authId
+            await badges.createBadge("Gated", false, false, ethers.ZeroAddress, "ipfs://gated",
+                [authId], [], [], [owner.address]);
+            const gatedId = STARTING_BADGE_ID + 2n;
+
+            // Attach a hook to authId that inflates balanceOf to 1 for everyone
+            const Hook = await ethers.getContractFactory("MockHook");
+            const inflatingHook = await Hook.deploy(true, true, true);
+            await inflatingHook.waitForDeployment();
+            await inflatingHook.setMockBalance(1); // hook claims everyone holds authId
+
+            await badges.setBadgeHook(authId, await inflatingHook.getAddress());
+
+            // user1 holds NO actual authId tokens — hook lies, but super.balanceOf should return 0
+            expect(await badges.balanceOf(user1.address, authId)).to.equal(1n); // hook inflates
+            expect(await (badges as any)["totalSupply(uint256)"](authId)).to.equal(0n); // real is 0
+
+            // Minting gated badge should fail because the permission check uses super.balanceOf
+            await expect(
+                badges.connect(user1).mint(user1.address, gatedId, 1, "0x")
+            ).to.be.revertedWithCustomError(badges, "MintNotAuthorized");
         });
     });
 });

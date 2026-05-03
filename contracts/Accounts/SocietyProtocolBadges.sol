@@ -190,6 +190,8 @@ contract SocietyProtocolBadges is
     error SelfInvitation();
     /// @notice A circular invitation was detected (e.g., A invited B, and B attempted to invite A).
     error CircularInvitation();
+    /// @notice A permission rule references an ID that is not a valid constant or existing badge.
+    error InvalidPermissionRule(uint256 rule);
 
     /// @custom:oz-upgrades-unsafe-allow constructor
     constructor() {
@@ -310,6 +312,17 @@ contract SocietyProtocolBadges is
     /**
      * @dev Internal helper for badge creation logic.
      */
+    function _validateRules(uint256[] memory rules) internal view {
+        for (uint256 i = 0; i < rules.length; i++) {
+            uint256 rule = rules[i];
+            if (rule != PERM_SELF && rule != PERM_EVERYONE) {
+                if (rule < STARTING_BADGE_ID || !_badgeCreated[rule]) {
+                    revert InvalidPermissionRule(rule);
+                }
+            }
+        }
+    }
+
     function _createBadge(
         string memory name,
         bool isOfficial,
@@ -321,6 +334,10 @@ contract SocietyProtocolBadges is
         uint256[] memory burners,
         address[] memory editors
     ) internal returns (uint256) {
+        _validateRules(minters);
+        _validateRules(transferers);
+        _validateRules(burners);
+
         nextTokenId++;
         uint256 id = nextTokenId;
         _badgeCreated[id] = true;
@@ -738,7 +755,7 @@ contract SocietyProtocolBadges is
                     }
                     if (rule >= STARTING_BADGE_ID) {
                         // User must hold the required badge effectively (hook check included)
-                        if (balanceOf(msg.sender, rule) > 0) {
+                        if (super.balanceOf(msg.sender, rule) > 0) {
                             allowed = true;
                             break;
                         }
