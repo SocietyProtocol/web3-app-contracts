@@ -300,14 +300,48 @@ describe("Society Protocol Badges (Upgradeable) - Refactored", function () {
     });
 
     describe("Profiles", function () {
-        it("Should create a profile and allow self-minting internally", async function () {
+        it("Should create a profile and set isProfileBadge flag", async function () {
             await badges.connect(user1).createProfile("ipfs://profile");
             const pid = await badges.profileBadgeId(user1.address);
 
             expect(await badges.balanceOf(user1.address, pid)).to.equal(1);
+            expect(await badges.isProfileBadge(pid)).to.equal(true);
+            expect(await (badges as any)["totalSupply(uint256)"](pid)).to.equal(1);
+        });
 
-            // createProfile prevents creating another.
-            await expect(badges.connect(user1).createProfile("ipfs://2")).to.be.revertedWithCustomError(badges, "ProfileAlreadyExists");
+        it("Should revert if user tries to create a second profile", async function () {
+            await badges.connect(user1).createProfile("ipfs://profile");
+            await expect(badges.connect(user1).createProfile("ipfs://2"))
+                .to.be.revertedWithCustomError(badges, "ProfileAlreadyExists");
+        });
+
+        it("Should revert with ProfileMustBeUnique when minting more supply of a profile badge", async function () {
+            await badges.connect(user1).createProfile("ipfs://profile");
+            const pid = await badges.profileBadgeId(user1.address);
+
+            // Attempt to mint a second copy — must be blocked regardless of who tries
+            await expect(badges.connect(user2).mint(user2.address, pid, 1, "0x"))
+                .to.be.revertedWithCustomError(badges, "ProfileMustBeUnique");
+            await expect(badges.connect(user1).mint(user1.address, pid, 1, "0x"))
+                .to.be.revertedWithCustomError(badges, "ProfileMustBeUnique");
+        });
+
+        it("Should block reentrant extra minting via onERC1155Received callback", async function () {
+            const ReceiverFactory = await ethers.getContractFactory("MockReentrantProfileReceiver");
+            const receiver = await ReceiverFactory.deploy(await badges.getAddress());
+            await receiver.waitForDeployment();
+
+            // The receiver calls createProfile and attempts to re-mint inside the callback
+            await receiver.createProfile("ipfs://reentrant");
+
+            // Profile was created with exactly 1 copy
+            const pid = await badges.profileBadgeId(await receiver.getAddress());
+            expect(await (badges as any)["totalSupply(uint256)"](pid)).to.equal(1);
+            expect(await badges.balanceOf(await receiver.getAddress(), pid)).to.equal(1);
+
+            // The reentry was attempted but blocked
+            expect(await receiver.reentryAttempted()).to.equal(true);
+            expect(await receiver.reentrySucceeded()).to.equal(false);
         });
 
         it("Should allow profile owner to update URI", async function () {

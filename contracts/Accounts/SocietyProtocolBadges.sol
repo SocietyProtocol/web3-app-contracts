@@ -97,6 +97,12 @@ contract SocietyProtocolBadges is
      */
     mapping(address => uint256) public profileBadgeId;
 
+    /// @notice True if the badge ID was created as a user profile badge.
+    mapping(uint256 => bool) public isProfileBadge;
+
+    /// @dev Per-badge mint mutex set during the ERC1155 callback window to block reentrant extra mints.
+    mapping(uint256 => bool) private _profileMintLocked;
+
     /// @notice The ID that will be assigned to the next created badge.
     uint256 public nextTokenId;
 
@@ -162,6 +168,8 @@ contract SocietyProtocolBadges is
     error NotProfileOwner();
     /// @notice User attempted to create a second profile badge.
     error ProfileAlreadyExists();
+    /// @notice Attempted to mint more than one instance of a profile badge.
+    error ProfileMustBeUnique();
     /// @notice The badge's hook contract denied the minting operation.
     error MintDeniedByHook();
     /// @notice The badge's hook contract denied the transfer operation.
@@ -286,6 +294,9 @@ contract SocietyProtocolBadges is
             empty,
             editors
         );
+
+        // Mark as profile badge before minting so _update can enforce the supply cap
+        isProfileBadge[pid] = true;
 
         // Temporarily allow self-minting for the creation transaction
         canMint[pid].push(PERM_SELF);
@@ -649,6 +660,16 @@ contract SocietyProtocolBadges is
     ) internal override(ERC1155Upgradeable, ERC1155SupplyUpgradeable) {
         for (uint256 i = 0; i < ids.length; i++) {
             uint256 id = ids[i];
+
+            // Profile badges are strictly one-of-one.
+            // _profileMintLocked blocks reentrant extra mints during the ERC1155 callback window
+            // (when totalSupply is still 0 but the first mint is in progress).
+            // totalSupply >= 1 blocks any subsequent non-reentrant minting attempts.
+            if (isProfileBadge[id] && from == address(0)) {
+                if (totalSupply(id) >= 1 || _profileMintLocked[id]) revert ProfileMustBeUnique();
+                _profileMintLocked[id] = true;
+            }
+
             address hook = badges[id].hook;
 
             if (hook != address(0)) {
