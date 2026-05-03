@@ -83,8 +83,6 @@ contract SocietyVipManager is
     // Errors
     // -------------------------------------------------------------------------
 
-    /// @notice Error thrown when the staking amount is less than the bronze tier requirement.
-    error InsufficientAmount();
     /// @notice Error thrown when the requested lock duration is shorter than the minimum allowed.
     error LockDurationTooShort();
     /// @notice Error thrown when attempting to unlock tokens while the lock is still active.
@@ -95,13 +93,22 @@ contract SocietyVipManager is
     error InvalidAddress();
     /// @notice Error thrown when tier amounts are zero or not strictly increasing.
     error InvalidTierAmounts();
+    /// @notice Error thrown when a user tries to create a new lock while an expired lock still holds tokens.
+    error ExpiredLockMustBeUnlockedFirst();
+    /// @notice Error thrown when the tierId is not 1 (Bronze), 2 (Silver), or 3 (Gold).
+    error InvalidTier();
+    /// @notice Error thrown when a user tries to call lock() while already having an active lock.
+    error LockAlreadyActive();
+    /// @notice Error thrown when upgradeTier is called with the same or a lower tier.
+    error CannotDowngradeTier();
 
     // -------------------------------------------------------------------------
     // Events
     // -------------------------------------------------------------------------
 
-    event TokensLocked(address indexed user, uint256 amount, uint256 unlockTime);
+    event TokensLocked(address indexed user, uint256 tierId, uint256 amount, uint256 unlockTime);
     event TokensUnlocked(address indexed user, uint256 amount);
+    event TierUpgraded(address indexed user, uint256 newTierId, uint256 newAmount, uint256 unlockTime);
     event AmountsUpdated(uint256 bronze, uint256 silver, uint256 gold);
     /// @notice Emitted when a community tier grant is created or overwritten.
     event CommunityTierGranted(uint256 indexed communityId, uint256 tierId, uint256 expiry);
@@ -173,29 +180,64 @@ contract SocietyVipManager is
     }
 
     /**
-     * @notice Locks tokens into a VIP tier for a specified duration.
-     * @dev Extends existing lock time if the new unlockTime is further in the future.
+     * @notice Returns the required staking amount for a given tier.
+     * @param tierId 1 = Bronze, 2 = Silver, 3 = Gold.
      */
-    function lock(uint256 amount, uint256 duration) external {
-        if (amount < bronzeAmount) revert InsufficientAmount();
+    function _tierAmount(uint256 tierId) internal view returns (uint256) {
+        if (tierId == 1) return bronzeAmount;
+        if (tierId == 2) return silverAmount;
+        if (tierId == 3) return goldAmount;
+        revert InvalidTier();
+    }
+
+    /**
+     * @notice Locks the required token amount for the chosen VIP tier.
+     * @dev The amount transferred is determined by the tier: 1 = bronzeAmount, 2 = silverAmount, 3 = goldAmount.
+     *      Reverts if the caller already has an active lock (use upgradeTier instead).
+     *      Reverts if the caller has an expired lock with unclaimed tokens (call unlock first).
+     * @param tierId  The target tier: 1 (Bronze), 2 (Silver), or 3 (Gold).
+     * @param duration Lock duration in seconds. Must be >= MIN_LOCK_DURATION.
+     */
+    function lock(uint256 tierId, uint256 duration) external {
+        uint256 amount = _tierAmount(tierId); // also validates tierId
         if (duration < MIN_LOCK_DURATION) revert LockDurationTooShort();
 
         LockInfo storage userLock = locks[msg.sender];
 
-        if (userLock.amount > 0 && block.timestamp < userLock.unlockTime) {
-            userLock.amount += amount;
-            uint256 newUnlockTime = block.timestamp + duration;
-            if (newUnlockTime > userLock.unlockTime) {
-                userLock.unlockTime = newUnlockTime;
+        if (userLock.amount > 0) {
+            if (block.timestamp < userLock.unlockTime) {
+                revert LockAlreadyActive();
+            } else {
+                revert ExpiredLockMustBeUnlockedFirst();
             }
-        } else {
-            // New lock or expired lock — start fresh
-            userLock.amount = amount;
-            userLock.unlockTime = block.timestamp + duration;
         }
 
+        userLock.amount = amount;
+        userLock.unlockTime = block.timestamp + duration;
+
         stakingToken.safeTransferFrom(msg.sender, address(this), amount);
-        emit TokensLocked(msg.sender, amount, userLock.unlockTime);
+        emit TokensLocked(msg.sender, tierId, amount, userLock.unlockTime);
+    }
+
+    /**
+     * @notice Upgrades an active lock to a higher VIP tier.
+     * @dev Only the difference between the new and current locked amount is transferred.
+     *      The unlock time is unchanged. Cannot downgrade or stay at the same tier.
+     * @param newTierId The target tier: 1 (Bronze), 2 (Silver), or 3 (Gold). Must be higher than current tier.
+     */
+    function upgradeTier(uint256 newTierId) external {
+        LockInfo storage userLock = locks[msg.sender];
+        if (userLock.amount == 0) revert NoTokensLocked();
+        if (block.timestamp >= userLock.unlockTime) revert ExpiredLockMustBeUnlockedFirst();
+
+        uint256 newAmount = _tierAmount(newTierId); // also validates newTierId
+        if (newAmount <= userLock.amount) revert CannotDowngradeTier();
+
+        uint256 topUp = newAmount - userLock.amount;
+        userLock.amount = newAmount;
+
+        stakingToken.safeTransferFrom(msg.sender, address(this), topUp);
+        emit TierUpgraded(msg.sender, newTierId, newAmount, userLock.unlockTime);
     }
 
     /**

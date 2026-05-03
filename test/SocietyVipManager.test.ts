@@ -12,8 +12,12 @@ describe("Society VIP Manager", function () {
 
     const BRONZE_AMOUNT = ethers.parseEther("400000");
     const SILVER_AMOUNT = ethers.parseEther("2000000");
-    const GOLD_AMOUNT = ethers.parseEther("10000000");
+    const GOLD_AMOUNT   = ethers.parseEther("10000000");
     const ONE_MONTH = 30 * 24 * 60 * 60;
+
+    const TIER_BRONZE = 1;
+    const TIER_SILVER = 2;
+    const TIER_GOLD   = 3;
 
     beforeEach(async function () {
         [owner, user1] = await ethers.getSigners();
@@ -37,7 +41,7 @@ describe("Society VIP Manager", function () {
         // Mint Governor badge to owner
         await badges.mint(owner.address, governorBadgeId, 1, "0x");
 
-        // 4. Create official VIP tier badges (mirrors deploy script)
+        // 4. Create official VIP tier badges
         const bronzeTx = await badges.createBadge("Bronze VIP", true, false, ethers.ZeroAddress, "", [], [], [governorBadgeId], [owner.address]);
         const bronzeReceipt = await bronzeTx.wait();
         const bronzeEvent = bronzeReceipt?.logs.find((l: any) => l.fragment && l.fragment.name === 'BadgeCreated') as any;
@@ -53,7 +57,7 @@ describe("Society VIP Manager", function () {
         const goldEvent = goldReceipt?.logs.find((l: any) => l.fragment && l.fragment.name === 'BadgeCreated') as any;
         const goldBadgeId = goldEvent?.args[0];
 
-        // 5. Deploy VIP Manager with badge IDs and tier amounts in one call
+        // 5. Deploy VIP Manager
         const VipManager = await ethers.getContractFactory("SocietyVipManager");
         vipManager = (await upgrades.deployProxy(VipManager, [
             await stakingToken.getAddress(),
@@ -66,13 +70,13 @@ describe("Society VIP Manager", function () {
         ], { initializer: 'initialize' })) as unknown as SocietyVipManager;
         await vipManager.waitForDeployment();
 
-        // 6. Wire up the hooks on each badge to point to VIP Manager
+        // 6. Wire hooks
         const vipManagerAddress = await vipManager.getAddress();
         await badges.setBadgeHook(bronzeBadgeId, vipManagerAddress);
         await badges.setBadgeHook(silverBadgeId, vipManagerAddress);
         await badges.setBadgeHook(goldBadgeId, vipManagerAddress);
 
-        // Fund user1 with enough for Gold tier (10M+)
+        // Fund user1 with enough for Gold tier + upgrades
         await stakingToken.transfer(user1.address, ethers.parseEther("12000000"));
         await stakingToken.connect(user1).approve(await vipManager.getAddress(), ethers.MaxUint256);
     });
@@ -82,49 +86,61 @@ describe("Society VIP Manager", function () {
         expect(await vipManager.bronzeBadgeId()).to.be.gt(0);
         expect(await vipManager.silverBadgeId()).to.be.gt(0);
         expect(await vipManager.goldBadgeId()).to.be.gt(0);
-
         expect(await vipManager.bronzeAmount()).to.equal(BRONZE_AMOUNT);
     });
 
-    it("Should return correct balances based on locked amounts (Hierarchical)", async function () {
+    it("Should lock Bronze and reflect correct badge balances", async function () {
         const bronzeId = await vipManager.bronzeBadgeId();
         const silverId = await vipManager.silverBadgeId();
-        const goldId = await vipManager.goldBadgeId();
+        const goldId   = await vipManager.goldBadgeId();
 
-        // Lock 500,000 -> Should get Bronze
-        await vipManager.connect(user1).lock(ethers.parseEther("500000"), ONE_MONTH);
+        await vipManager.connect(user1).lock(TIER_BRONZE, ONE_MONTH);
 
         expect(await badges.balanceOf(user1.address, bronzeId)).to.equal(1);
         expect(await badges.balanceOf(user1.address, silverId)).to.equal(0);
         expect(await badges.balanceOf(user1.address, goldId)).to.equal(0);
+    });
 
-        // Lock another 1,500,000 -> Total 2,000,000 -> Should get Silver AND Bronze
-        await vipManager.connect(user1).lock(ethers.parseEther("1500000"), ONE_MONTH);
+    it("Should upgrade tiers and reflect cumulative badge balances", async function () {
+        const bronzeId = await vipManager.bronzeBadgeId();
+        const silverId = await vipManager.silverBadgeId();
+        const goldId   = await vipManager.goldBadgeId();
 
+        await vipManager.connect(user1).lock(TIER_BRONZE, ONE_MONTH);
+        expect(await badges.balanceOf(user1.address, bronzeId)).to.equal(1);
+        expect(await badges.balanceOf(user1.address, silverId)).to.equal(0);
+
+        await vipManager.connect(user1).upgradeTier(TIER_SILVER);
         expect(await badges.balanceOf(user1.address, bronzeId)).to.equal(1);
         expect(await badges.balanceOf(user1.address, silverId)).to.equal(1);
         expect(await badges.balanceOf(user1.address, goldId)).to.equal(0);
 
-        // Lock another 8,000,000 -> Total 10,000,000 -> Should get Gold, Silver, and Bronze
-        await vipManager.connect(user1).lock(ethers.parseEther("8000000"), ONE_MONTH);
-
-        expect(await badges.balanceOf(user1.address, goldId)).to.equal(1);
-        expect(await badges.balanceOf(user1.address, silverId)).to.equal(1);
+        await vipManager.connect(user1).upgradeTier(TIER_GOLD);
         expect(await badges.balanceOf(user1.address, bronzeId)).to.equal(1);
+        expect(await badges.balanceOf(user1.address, silverId)).to.equal(1);
+        expect(await badges.balanceOf(user1.address, goldId)).to.equal(1);
     });
 
-    it("Should fail if locking less than bronze amount", async function () {
-        await expect(
-            vipManager.connect(user1).lock(ethers.parseEther("300000"), ONE_MONTH)
-        ).to.be.revertedWithCustomError(vipManager, "InsufficientAmount");
+    it("Should transfer exactly the tier amount when locking", async function () {
+        const before = await stakingToken.balanceOf(user1.address);
+        await vipManager.connect(user1).lock(TIER_BRONZE, ONE_MONTH);
+        const after = await stakingToken.balanceOf(user1.address);
+        expect(before - after).to.equal(BRONZE_AMOUNT);
+    });
+
+    it("Should transfer only the tier difference when upgrading", async function () {
+        await vipManager.connect(user1).lock(TIER_BRONZE, ONE_MONTH);
+        const before = await stakingToken.balanceOf(user1.address);
+        await vipManager.connect(user1).upgradeTier(TIER_SILVER);
+        const after = await stakingToken.balanceOf(user1.address);
+        expect(before - after).to.equal(SILVER_AMOUNT - BRONZE_AMOUNT);
     });
 
     it("Should set balance to 0 after lock expires", async function () {
         const bronzeId = await vipManager.bronzeBadgeId();
-        await vipManager.connect(user1).lock(BRONZE_AMOUNT, ONE_MONTH);
+        await vipManager.connect(user1).lock(TIER_BRONZE, ONE_MONTH);
         expect(await badges.balanceOf(user1.address, bronzeId)).to.equal(1);
 
-        // Advance time
         await time.increase(ONE_MONTH + 1);
 
         expect(await badges.balanceOf(user1.address, bronzeId)).to.equal(0);
@@ -135,14 +151,15 @@ describe("Society VIP Manager", function () {
         await vipManager.setTierAmounts(newBronze, SILVER_AMOUNT, GOLD_AMOUNT);
         expect(await vipManager.bronzeAmount()).to.equal(newBronze);
 
-        // Now locking 400k (original bronze) should fail
-        await expect(
-            vipManager.connect(user1).lock(BRONZE_AMOUNT, ONE_MONTH)
-        ).to.be.revertedWithCustomError(vipManager, "InsufficientAmount");
+        // lock(TIER_BRONZE) now takes the updated amount
+        const before = await stakingToken.balanceOf(user1.address);
+        await vipManager.connect(user1).lock(TIER_BRONZE, ONE_MONTH);
+        const after = await stakingToken.balanceOf(user1.address);
+        expect(before - after).to.equal(newBronze);
     });
 
     it("Should allow unlocking after expiration", async function () {
-        await vipManager.connect(user1).lock(BRONZE_AMOUNT, ONE_MONTH);
+        await vipManager.connect(user1).lock(TIER_BRONZE, ONE_MONTH);
 
         await expect(vipManager.connect(user1).unlock()).to.be.revertedWithCustomError(vipManager, "LockStillActive");
 
@@ -150,15 +167,50 @@ describe("Society VIP Manager", function () {
         const before = await stakingToken.balanceOf(user1.address);
         await vipManager.connect(user1).unlock();
         const after = await stakingToken.balanceOf(user1.address);
-
         expect(after - before).to.equal(BRONZE_AMOUNT);
     });
 
+    it("Should allow re-locking after unlock", async function () {
+        await vipManager.connect(user1).lock(TIER_BRONZE, ONE_MONTH);
+        await time.increase(ONE_MONTH + 1);
+        await vipManager.connect(user1).unlock();
+
+        // Can now lock again
+        await expect(vipManager.connect(user1).lock(TIER_SILVER, ONE_MONTH)).to.not.be.reverted;
+    });
+
     describe("VipManager Edge Cases", function () {
+        it("Should revert with InvalidTier for tier 0", async function () {
+            await expect(
+                vipManager.connect(user1).lock(0, ONE_MONTH)
+            ).to.be.revertedWithCustomError(vipManager, "InvalidTier");
+        });
+
+        it("Should revert with InvalidTier for tier > 3", async function () {
+            await expect(
+                vipManager.connect(user1).lock(4, ONE_MONTH)
+            ).to.be.revertedWithCustomError(vipManager, "InvalidTier");
+        });
+
         it("Should revert if duration is less than MIN_LOCK_DURATION", async function () {
             await expect(
-                vipManager.connect(user1).lock(BRONZE_AMOUNT, ONE_MONTH - 1)
+                vipManager.connect(user1).lock(TIER_BRONZE, ONE_MONTH - 1)
             ).to.be.revertedWithCustomError(vipManager, "LockDurationTooShort");
+        });
+
+        it("Should revert with LockAlreadyActive when locking with an active lock", async function () {
+            await vipManager.connect(user1).lock(TIER_BRONZE, ONE_MONTH);
+            await expect(
+                vipManager.connect(user1).lock(TIER_BRONZE, ONE_MONTH)
+            ).to.be.revertedWithCustomError(vipManager, "LockAlreadyActive");
+        });
+
+        it("Should revert with ExpiredLockMustBeUnlockedFirst when locking over expired lock", async function () {
+            await vipManager.connect(user1).lock(TIER_BRONZE, ONE_MONTH);
+            await time.increase(ONE_MONTH + 1);
+            await expect(
+                vipManager.connect(user1).lock(TIER_BRONZE, ONE_MONTH)
+            ).to.be.revertedWithCustomError(vipManager, "ExpiredLockMustBeUnlockedFirst");
         });
 
         it("Should revert if unlocking with no tokens locked", async function () {
@@ -168,16 +220,50 @@ describe("Society VIP Manager", function () {
             ).to.be.revertedWithCustomError(vipManager, "NoTokensLocked");
         });
 
-        it("Should properly extend an existing lock", async function () {
-            await vipManager.connect(user1).lock(BRONZE_AMOUNT, ONE_MONTH);
+        it("upgradeTier should revert with NoTokensLocked when no lock exists", async function () {
+            await expect(
+                vipManager.connect(user1).upgradeTier(TIER_SILVER)
+            ).to.be.revertedWithCustomError(vipManager, "NoTokensLocked");
+        });
+
+        it("upgradeTier should revert with CannotDowngradeTier on same tier", async function () {
+            await vipManager.connect(user1).lock(TIER_SILVER, ONE_MONTH);
+            await expect(
+                vipManager.connect(user1).upgradeTier(TIER_SILVER)
+            ).to.be.revertedWithCustomError(vipManager, "CannotDowngradeTier");
+        });
+
+        it("upgradeTier should revert with CannotDowngradeTier on lower tier", async function () {
+            await vipManager.connect(user1).lock(TIER_SILVER, ONE_MONTH);
+            await expect(
+                vipManager.connect(user1).upgradeTier(TIER_BRONZE)
+            ).to.be.revertedWithCustomError(vipManager, "CannotDowngradeTier");
+        });
+
+        it("upgradeTier should revert with ExpiredLockMustBeUnlockedFirst on expired lock", async function () {
+            await vipManager.connect(user1).lock(TIER_BRONZE, ONE_MONTH);
+            await time.increase(ONE_MONTH + 1);
+            await expect(
+                vipManager.connect(user1).upgradeTier(TIER_SILVER)
+            ).to.be.revertedWithCustomError(vipManager, "ExpiredLockMustBeUnlockedFirst");
+        });
+
+        it("upgradeTier should revert with InvalidTier for invalid tier number", async function () {
+            await vipManager.connect(user1).lock(TIER_BRONZE, ONE_MONTH);
+            await expect(
+                vipManager.connect(user1).upgradeTier(4)
+            ).to.be.revertedWithCustomError(vipManager, "InvalidTier");
+        });
+
+        it("upgradeTier preserves unlock time", async function () {
+            await vipManager.connect(user1).lock(TIER_BRONZE, ONE_MONTH);
             const lockBefore = await vipManager.locks(user1.address);
 
-            // Add more tokens and extend duration
-            await vipManager.connect(user1).lock(BRONZE_AMOUNT, ONE_MONTH * 2);
+            await vipManager.connect(user1).upgradeTier(TIER_SILVER);
             const lockAfter = await vipManager.locks(user1.address);
 
-            expect(lockAfter.amount).to.equal(BRONZE_AMOUNT * 2n);
-            expect(lockAfter.unlockTime).to.be.gt(lockBefore.unlockTime);
+            expect(lockAfter.unlockTime).to.equal(lockBefore.unlockTime);
+            expect(lockAfter.amount).to.equal(SILVER_AMOUNT);
         });
 
         it("Should deny direct mint/transfer/burn via VIP hook", async function () {
@@ -199,7 +285,6 @@ describe("Society VIP Manager", function () {
 
     describe("Hook Priority & Fallback Logic", function () {
         it("Should allow minting using rules if NO hook is configured", async function () {
-            // Create a community badge with PERM_SELF to allow self-minting
             const rules: any[] = [1]; // PERM_SELF
             const editors = [owner.address];
 
@@ -208,7 +293,6 @@ describe("Society VIP Manager", function () {
             const event = receipt?.logs.find((l: any) => l.fragment && l.fragment.name === 'BadgeCreated') as any;
             const badgeId = event?.args[0];
 
-            // User1 should be able to self-mint because PERM_SELF is in rules
             await expect(badges.connect(user1).mint(user1.address, badgeId, 1, "0x"))
                 .to.emit(badges, "TransferSingle");
 
@@ -225,14 +309,11 @@ describe("Society VIP Manager", function () {
 
         it("Should NOT allow non-owner to upgrade", async function () {
             const VipManagerV2 = await ethers.getContractFactory("SocietyVipManager");
-            // Hardhat upgrades doesn't easily test rejection of upgrade by non-owner via high-level API
-            // But we can check it via low-level call if needed or trust the onlyOwner modifier in _authorizeUpgrade
-            // To properly test rejection:
             const proxy = (await ethers.getContractAt("UUPSUpgradeable", await vipManager.getAddress())) as any;
             const newImpl = await (await VipManagerV2.deploy()).getAddress();
 
             await expect(proxy.connect(user1).upgradeToAndCall(newImpl, "0x"))
-                .to.be.reverted; // usually reverted with Ownable error or custom error if we used it
+                .to.be.reverted;
         });
     });
 
@@ -241,19 +322,17 @@ describe("Society VIP Manager", function () {
     // -------------------------------------------------------------------------
 
     describe("Community Tiers", function () {
-        // Tier level constants (owner-defined identifiers, not badge IDs)
         const BRONZE = 1n;
         const SILVER = 2n;
         const GOLD   = 3n;
         const ONE_YEAR = 365 * 24 * 60 * 60;
 
-        let communityId: bigint;  // the creator badge ID acting as the community identifier
+        let communityId: bigint;
         let creator: any;
 
         beforeEach(async function () {
             [, , , creator] = await ethers.getSigners();
 
-            // Create a community creator badge (PERM_EVERYONE mint, PERM_SELF transfer)
             const tx = await badges.createBadge(
                 "Test Community Creator", true, false, ethers.ZeroAddress, "",
                 [2n], [1n], [], [owner.address]
@@ -327,7 +406,7 @@ describe("Society VIP Manager", function () {
             await vipManager.grantCommunityTier(communityId, BRONZE, ONE_YEAR);
             await expect(vipManager.revokeCommunityTier(9999n)).to.not.be.reverted;
             const [tierId] = await vipManager.getCommunityTier(communityId);
-            expect(tierId).to.equal(BRONZE);  // real grant untouched
+            expect(tierId).to.equal(BRONZE);
         });
 
         it("revoking an already-revoked community is a no-op", async function () {
@@ -342,7 +421,7 @@ describe("Society VIP Manager", function () {
             const event2 = receipt2?.logs.find((l: any) => l.fragment?.name === 'BadgeCreated') as any;
             const community2Id = event2?.args[0];
 
-            await vipManager.grantCommunityTier(communityId,   BRONZE, ONE_YEAR);
+            await vipManager.grantCommunityTier(communityId,  BRONZE, ONE_YEAR);
             await vipManager.grantCommunityTier(community2Id, GOLD,   ONE_YEAR);
 
             const [tier1] = await vipManager.getCommunityTier(communityId);
@@ -353,11 +432,10 @@ describe("Society VIP Manager", function () {
 
         it("staking tiers are unaffected by community tier operations", async function () {
             const bronzeId = await vipManager.bronzeBadgeId();
-            await vipManager.connect(user1).lock(BRONZE_AMOUNT, ONE_MONTH);
+            await vipManager.connect(user1).lock(TIER_BRONZE, ONE_MONTH);
             expect(await badges.balanceOf(user1.address, bronzeId)).to.equal(1);
 
             await vipManager.grantCommunityTier(communityId, BRONZE, ONE_YEAR);
-            // staking balance unchanged
             expect(await badges.balanceOf(user1.address, bronzeId)).to.equal(1);
         });
     });
