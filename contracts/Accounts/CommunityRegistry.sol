@@ -91,6 +91,8 @@ contract CommunityRegistry is Initializable, OwnableUpgradeable, UUPSUpgradeable
 
     /// @notice A zero address was provided where a valid address is required.
     error InvalidAddress();
+    /// @notice The badge ID does not belong to the given community.
+    error BadgeNotInCommunity();
 
     // -------------------------------------------------------------------------
     // Constructor / Initializer
@@ -271,6 +273,49 @@ contract CommunityRegistry is Initializable, OwnableUpgradeable, UUPSUpgradeable
         communities[communityId].name = name;
         communities[communityId].description = description;
         emit CommunityDetailsUpdated(communityId, name, description);
+    }
+
+    /**
+     * @notice Updates the metadata URI for any badge that belongs to this community.
+     * @dev Routes through the registry (the sole editor) so access always follows the creator badge,
+     *      not a stale stored address.
+     * @param communityId The community whose badge is being updated (= Creator badge ID).
+     * @param badgeId The badge to update. Must belong to this community.
+     * @param uri The new metadata URI.
+     */
+    function setBadgeURI(
+        uint256 communityId,
+        uint256 badgeId,
+        string calldata uri
+    ) external onlyCreator(communityId) {
+        if (!_isCommunityBadge(communityId, badgeId)) revert BadgeNotInCommunity();
+        badges.setURI(badgeId, uri);
+    }
+
+    /**
+     * @notice Sets the hook contract for any badge that belongs to this community.
+     * @param communityId The community whose badge is being updated (= Creator badge ID).
+     * @param badgeId The badge to update. Must belong to this community.
+     * @param hook The new hook address (use address(0) to remove).
+     */
+    function setBadgeHook(
+        uint256 communityId,
+        uint256 badgeId,
+        address hook
+    ) external onlyCreator(communityId) {
+        if (!_isCommunityBadge(communityId, badgeId)) revert BadgeNotInCommunity();
+        badges.setBadgeHook(badgeId, hook);
+    }
+
+    /// @dev Returns true if badgeId was created as part of communityId.
+    function _isCommunityBadge(uint256 communityId, uint256 badgeId) internal view returns (bool) {
+        if (badgeId == communityId) return true;
+        if (badgeId == communities[communityId].memberBadgeId) return true;
+        uint256[] storage extra = _communityBadgeIds[communityId];
+        for (uint256 i = 0; i < extra.length; i++) {
+            if (extra[i] == badgeId) return true;
+        }
+        return false;
     }
 
     // -------------------------------------------------------------------------

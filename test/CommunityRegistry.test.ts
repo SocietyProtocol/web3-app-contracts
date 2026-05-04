@@ -160,6 +160,48 @@ describe("CommunityRegistry", function () {
             ).to.be.revertedWithCustomError(badges, "MintNotAuthorized");
         });
 
+        it("creator can update creator badge URI via registry", async function () {
+            await expect(
+                registry.connect(alice).setBadgeURI(COMMUNITY_ID, COMMUNITY_ID, "ipfs://new-creator-uri")
+            ).to.not.be.reverted;
+        });
+
+        it("creator can update member badge URI via registry", async function () {
+            await expect(
+                registry.connect(alice).setBadgeURI(COMMUNITY_ID, MEMBER_BADGE_ID, "ipfs://new-member-uri")
+            ).to.not.be.reverted;
+        });
+
+        it("creator cannot update badge URI directly on badge contract", async function () {
+            await expect(
+                badges.connect(alice).setURI(COMMUNITY_ID, "ipfs://hack")
+            ).to.be.revertedWithCustomError(badges, "Unauthorized");
+        });
+
+        it("non-creator cannot update badge URI via registry", async function () {
+            await expect(
+                registry.connect(bob).setBadgeURI(COMMUNITY_ID, COMMUNITY_ID, "ipfs://hack")
+            ).to.be.revertedWithCustomError(registry, "Unauthorized");
+        });
+
+        it("creator cannot update a badge from a different community via registry", async function () {
+            await registry.connect(bob).createCommunity("Beta", "Desc", "uri:c2", "uri:m2");
+            const otherCommunityId = COMMUNITY_ID + 2n; // two badges created per community
+            await expect(
+                registry.connect(alice).setBadgeURI(COMMUNITY_ID, otherCommunityId, "ipfs://hack")
+            ).to.be.revertedWithCustomError(registry, "BadgeNotInCommunity");
+        });
+
+        it("after badge transfer, new holder can update URI; old holder cannot", async function () {
+            await badges.connect(alice).safeTransferFrom(alice.address, bob.address, COMMUNITY_ID, 1, "0x");
+            await expect(
+                registry.connect(bob).setBadgeURI(COMMUNITY_ID, MEMBER_BADGE_ID, "ipfs://bob-update")
+            ).to.not.be.reverted;
+            await expect(
+                registry.connect(alice).setBadgeURI(COMMUNITY_ID, MEMBER_BADGE_ID, "ipfs://alice-update")
+            ).to.be.revertedWithCustomError(registry, "Unauthorized");
+        });
+
         it("creator badge transfers correctly and new holder gains creator powers", async function () {
             await badges.connect(alice).safeTransferFrom(alice.address, bob.address, COMMUNITY_ID, 1, "0x");
 
