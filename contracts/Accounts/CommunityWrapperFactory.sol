@@ -83,7 +83,8 @@ contract CommunityWrapperFactory is
     function createWrapper(
         string calldata name,
         string calldata symbol,
-        uint256[] calldata initialBadgeIds
+        uint256[] calldata initialBadgeIds,
+        uint256 creatorBadgeId
     ) external returns (address) {
         address clone = Clones.clone(wrapperImplementation);
 
@@ -92,7 +93,7 @@ contract CommunityWrapperFactory is
             symbol,
             badgeContract,
             initialBadgeIds,
-            msg.sender
+            creatorBadgeId
         );
 
         emit WrapperDeployed(

@@ -225,7 +225,7 @@ contract CommunityRegistry is Initializable, OwnableUpgradeable, UUPSUpgradeable
         uint256[] memory badgeIds = new uint256[](1);
         badgeIds[0] = communities[communityId].memberBadgeId;
 
-        wrapper = wrapperFactory.createWrapper(wrapperName, wrapperSymbol, badgeIds);
+        wrapper = wrapperFactory.createWrapper(wrapperName, wrapperSymbol, badgeIds, communityId);
         communities[communityId].wrapper = wrapper;
 
         emit CommunityWrapperDeployed(communityId, wrapper);
