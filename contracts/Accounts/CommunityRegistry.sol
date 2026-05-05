@@ -144,14 +144,16 @@ contract CommunityRegistry is Initializable, OwnableUpgradeable, UUPSUpgradeable
      *      Both the creator badge and one member badge are minted to the caller immediately.
      *
      *      Creator badge permissions:
-     *        - canMint: [] — only registry (via COMMUNITY_MANAGER_ROLE) can mint.
-     *        - canTransfer: [PERM_SELF] — only the current holder can transfer.
-     *        - canBurn: [] — non-burnable.
+     *        - canMint: [] — no one can mint additional creator badges directly; the registry
+     *                        mints the first one via COMMUNITY_MANAGER_ROLE on creation.
+     *        - canTransfer: [PERM_SELF] — only the current holder can transfer (e.g. to a Safe).
+     *        - canBurn: [] — no direct burn; holder can transfer to address(0) to destroy.
      *
      *      Member badge permissions:
-     *        - canMint: [creatorBadgeId] — only Creator badge holder can mint.
-     *        - canTransfer: [] — soulbound.
-     *        - canBurn: [creatorBadgeId] — Creator badge holder can burn.
+     *        - canMint: [creatorBadgeId] — only the Creator badge holder can mint member badges.
+     *        - canTransfer: [] — non-transferable; Creator badge holder can burn and re-mint
+     *                           to a new address if a membership needs to move.
+     *        - canBurn: [creatorBadgeId] — Creator badge holder can revoke membership.
      *
      * @param name Community name.
      * @param description Community description.

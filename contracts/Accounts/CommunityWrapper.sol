@@ -7,9 +7,11 @@ import "@openzeppelin/contracts/token/ERC1155/IERC1155.sol";
 
 /**
  * @title CommunityWrapper
- * @notice A non-transferable ERC20 wrapper that returns a cumulative balance based on ERC1155 badge ownership.
- * @dev Balance is the sum of the account's balances for all required badge IDs.
- * @dev This contract is designed to be used with the Clones pattern.
+ * @notice A non-transferable ERC20 read adapter that exposes community membership as an ERC20 balance.
+ * @dev Balance is the sum of the account's ERC1155 balances across all configured badge IDs.
+ *      Holding any of the listed badges contributes to the balance — this is additive (sum), not conjunctive (AND).
+ *      Designed for use with Snapshot's erc20-balance-of strategy. Not a standard transferable token.
+ *      Deployed via the EIP-1167 Clones pattern.
  */
 contract CommunityWrapper is
     Initializable,
@@ -19,10 +21,7 @@ contract CommunityWrapper is
     address public badgeContract;
     /// @notice The badge ID that grants admin rights over this wrapper. Whoever holds it is the owner.
     uint256 public creatorBadgeId;
-    /**
-     * @notice The list of badge IDs that a user must hold to have a balance in this wrapper.
-     * @dev A user must hold at least one of each listed ID to be considered a "member".
-     */
+    /// @notice The badge IDs whose balances are summed to produce a user's wrapper balance.
     uint256[] public allowedBadgeIds;
     /// @notice The maximum number of badge IDs that can be required for membership.
     uint256 public constant MAX_BADGES = 5;
