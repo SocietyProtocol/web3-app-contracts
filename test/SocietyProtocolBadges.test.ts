@@ -502,6 +502,31 @@ describe("Society Protocol Badges (Upgradeable) - Refactored", function () {
             await expect(badges.burn(user1.address, badId, 1))
                 .to.be.revertedWithCustomError(badges, "BadgeDoesNotExist");
         });
+
+        it("Should revert for ID equal to STARTING_BADGE_ID (reserved boundary)", async function () {
+            await expect(badges.mint(user1.address, STARTING_BADGE_ID, 1, "0x"))
+                .to.be.revertedWithCustomError(badges, "BadgeDoesNotExist");
+        });
+
+        it("Should revert for ID 0", async function () {
+            await expect(badges.mint(user1.address, 0n, 1, "0x"))
+                .to.be.revertedWithCustomError(badges, "BadgeDoesNotExist");
+        });
+
+        it("Should revert for nextTokenId + 1 (not yet created)", async function () {
+            await badges.createBadge("Badge", false, false, ethers.ZeroAddress, "ipfs://a",
+                [PERM_EVERYONE], [], [], [owner.address]);
+            const nextId = await badges.nextTokenId() + 1n;
+            await expect(badges.mint(user1.address, nextId, 1, "0x"))
+                .to.be.revertedWithCustomError(badges, "BadgeDoesNotExist");
+        });
+
+        it("Should succeed for a valid created badge ID", async function () {
+            await badges.createBadge("Badge", false, false, ethers.ZeroAddress, "ipfs://a",
+                [PERM_EVERYONE], [], [], [owner.address]);
+            const validId = await badges.nextTokenId();
+            await expect(badges.mint(user1.address, validId, 1, "0x")).to.not.be.reverted;
+        });
     });
 
     describe("H04 — Permission Rule Validation & Hook-Aware balanceOf", function () {

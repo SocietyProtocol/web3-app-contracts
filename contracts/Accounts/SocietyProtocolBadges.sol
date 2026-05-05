@@ -37,7 +37,7 @@ contract SocietyProtocolBadges is
     uint256 public constant PERM_SELF = 1;
     /// @notice Permission type: Anyone can perform the action.
     uint256 public constant PERM_EVERYONE = 2;
-    /// @notice The first valid ID for dynamic/user-created badges. IDs below this are reserved.
+    /// @notice IDs up to and including this value are reserved. The first badge ID is STARTING_BADGE_ID + 1.
     uint256 public constant STARTING_BADGE_ID = 10;
     /// @notice Maximum number of rules allowed per permission array (canMint/canTransfer/canBurn).
     uint256 public constant MAX_PERMISSION_RULES = 10;
@@ -105,11 +105,13 @@ contract SocietyProtocolBadges is
     /// @dev Per-badge mint mutex set during the ERC1155 callback window to block reentrant extra mints.
     mapping(uint256 => bool) private _profileMintLocked;
 
-    /// @notice The ID that will be assigned to the next created badge.
+    /// @notice The most recently assigned badge ID. The next badge will receive nextTokenId + 1.
     uint256 public nextTokenId;
 
-    /// @dev Tracks which badge IDs have been created. Used for existence checks.
-    mapping(uint256 => bool) private _badgeCreated;
+    /// @dev Returns true if the badge ID has been created.
+    function _badgeExists(uint256 id) internal view returns (bool) {
+        return id > STARTING_BADGE_ID && id <= nextTokenId;
+    }
 
     /**
      * @notice Emitted when a new badge type is created.
@@ -322,7 +324,7 @@ contract SocietyProtocolBadges is
         for (uint256 i = 0; i < rules.length; i++) {
             uint256 rule = rules[i];
             if (rule != PERM_SELF && rule != PERM_EVERYONE) {
-                if (rule < STARTING_BADGE_ID || !_badgeCreated[rule]) {
+                if (rule < STARTING_BADGE_ID || !_badgeExists(rule)) {
                     revert InvalidPermissionRule(rule);
                 }
             }
@@ -346,7 +348,6 @@ contract SocietyProtocolBadges is
 
         nextTokenId++;
         uint256 id = nextTokenId;
-        _badgeCreated[id] = true;
 
         badges[id] = BadgeInfo({
             name: name,
@@ -398,7 +399,7 @@ contract SocietyProtocolBadges is
         bool isOfficial,
         string memory metadataURI
     ) external {
-        if (!_badgeCreated[id]) revert BadgeDoesNotExist();
+        if (!_badgeExists(id)) revert BadgeDoesNotExist();
 
         // Check edit permission
         if (!canEdit[id][msg.sender]) revert Unauthorized();
@@ -433,7 +434,7 @@ contract SocietyProtocolBadges is
         uint256 amount,
         bytes memory data
     ) public {
-        if (!_badgeCreated[id]) revert BadgeDoesNotExist();
+        if (!_badgeExists(id)) revert BadgeDoesNotExist();
         // Permission check is done in _update
         _mint(to, id, amount, data);
     }
@@ -448,7 +449,7 @@ contract SocietyProtocolBadges is
         bytes memory data
     ) public {
         for (uint256 i = 0; i < ids.length; i++) {
-            if (!_badgeCreated[ids[i]]) revert BadgeDoesNotExist();
+            if (!_badgeExists(ids[i])) revert BadgeDoesNotExist();
         }
         // Permission check is done in _update
         _mintBatch(to, ids, amounts, data);
@@ -490,7 +491,7 @@ contract SocietyProtocolBadges is
      * @notice Standard public burn function.
      */
     function burn(address from, uint256 id, uint256 value) public {
-        if (!_badgeCreated[id]) revert BadgeDoesNotExist();
+        if (!_badgeExists(id)) revert BadgeDoesNotExist();
         _burn(from, id, value);
     }
 
@@ -503,7 +504,7 @@ contract SocietyProtocolBadges is
         uint256[] memory values
     ) public {
         for (uint256 i = 0; i < ids.length; i++) {
-            if (!_badgeCreated[ids[i]]) revert BadgeDoesNotExist();
+            if (!_badgeExists(ids[i])) revert BadgeDoesNotExist();
         }
         _burnBatch(from, ids, values);
     }
@@ -517,7 +518,7 @@ contract SocietyProtocolBadges is
         uint256 amount,
         bytes memory data
     ) public {
-        if (!_badgeCreated[id]) revert BadgeDoesNotExist();
+        if (!_badgeExists(id)) revert BadgeDoesNotExist();
         for (uint256 i = 0; i < to.length; i++) {
             // Permission check is done in _update for each mint
             _mint(to[i], id, amount, data);
