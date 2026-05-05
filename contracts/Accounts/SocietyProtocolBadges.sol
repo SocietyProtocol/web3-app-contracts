@@ -39,6 +39,8 @@ contract SocietyProtocolBadges is
     uint256 public constant PERM_EVERYONE = 2;
     /// @notice The first valid ID for dynamic/user-created badges. IDs below this are reserved.
     uint256 public constant STARTING_BADGE_ID = 10;
+    /// @notice Maximum number of rules allowed per permission array (canMint/canTransfer/canBurn).
+    uint256 public constant MAX_PERMISSION_RULES = 10;
 
     /// @dev EIP-712 typehash for invitations.
     bytes32 private constant INVITE_TYPEHASH =
@@ -192,6 +194,8 @@ contract SocietyProtocolBadges is
     error CircularInvitation();
     /// @notice A permission rule references an ID that is not a valid constant or existing badge.
     error InvalidPermissionRule(uint256 rule);
+    /// @notice A permission array exceeds the maximum allowed length.
+    error TooManyPermissionRules();
 
     /// @custom:oz-upgrades-unsafe-allow constructor
     constructor() {
@@ -313,6 +317,7 @@ contract SocietyProtocolBadges is
      * @dev Internal helper for badge creation logic.
      */
     function _validateRules(uint256[] memory rules) internal view {
+        if (rules.length > MAX_PERMISSION_RULES) revert TooManyPermissionRules();
         for (uint256 i = 0; i < rules.length; i++) {
             uint256 rule = rules[i];
             if (rule != PERM_SELF && rule != PERM_EVERYONE) {

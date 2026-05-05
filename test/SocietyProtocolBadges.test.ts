@@ -533,6 +533,24 @@ describe("Society Protocol Badges (Upgradeable) - Refactored", function () {
             ).to.not.be.reverted;
         });
 
+        it("Should revert createBadge if a permission array exceeds MAX_PERMISSION_RULES (10)", async function () {
+            const tooMany = Array.from({ length: 11 }, () => PERM_EVERYONE);
+            await expect(
+                badges.createBadge("TooMany", false, false, ethers.ZeroAddress, "ipfs://tm",
+                    tooMany, [], [], [owner.address])
+            ).to.be.revertedWithCustomError(badges, "TooManyPermissionRules");
+
+            await expect(
+                badges.createBadge("TooMany", false, false, ethers.ZeroAddress, "ipfs://tm",
+                    [], tooMany, [], [owner.address])
+            ).to.be.revertedWithCustomError(badges, "TooManyPermissionRules");
+
+            await expect(
+                badges.createBadge("TooMany", false, false, ethers.ZeroAddress, "ipfs://tm",
+                    [], [], tooMany, [owner.address])
+            ).to.be.revertedWithCustomError(badges, "TooManyPermissionRules");
+        });
+
         it("Hook-inflated balanceOf should NOT grant badge-gated mint permission", async function () {
             // Create auth badge
             await badges.createBadge("Auth", false, false, ethers.ZeroAddress, "ipfs://auth",
