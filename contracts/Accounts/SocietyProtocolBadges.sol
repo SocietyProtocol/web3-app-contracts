@@ -285,10 +285,9 @@ contract SocietyProtocolBadges is
         if (profileBadgeId[msg.sender] != 0) revert ProfileAlreadyExists();
 
         uint256[] memory empty = new uint256[](0);
-        address[] memory editors = new address[](1);
-        editors[0] = msg.sender;
+        address[] memory noEditors = new address[](0);
 
-        // Create the badge type
+        // Create the badge type — no editors: updateProfileURI has its own ownership check
         uint256 pid = _createBadge(
             "Profile",
             false,
@@ -298,7 +297,7 @@ contract SocietyProtocolBadges is
             empty,
             empty,
             empty,
-            editors
+            noEditors
         );
 
         // Mark as profile badge before minting so _update can enforce the supply cap

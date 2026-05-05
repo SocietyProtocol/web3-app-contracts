@@ -377,6 +377,14 @@ describe("Society Protocol Badges (Upgradeable) - Refactored", function () {
                 .to.be.revertedWithCustomError(badges, "NotProfileOwner");
         });
 
+        it("Should REVERT when profile owner tries to set a hook on their profile badge", async function () {
+            await badges.connect(user1).createProfile("ipfs://p1");
+            const pid = await badges.profileBadgeId(user1.address);
+
+            await expect(badges.connect(user1).setBadgeHook(pid, owner.address))
+                .to.be.revertedWithCustomError(badges, "Unauthorized");
+        });
+
         it("Should REVERT when updateProfileURI is called with a wrong profile badge ID", async function () {
             await badges.connect(user1).createProfile("ipfs://p1");
             await badges.connect(user2).createProfile("ipfs://p2");
