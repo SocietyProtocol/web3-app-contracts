@@ -196,6 +196,8 @@ contract SocietyProtocolBadges is
     error InvalidPermissionRule(uint256 rule);
     /// @notice A permission array exceeds the maximum allowed length.
     error TooManyPermissionRules();
+    /// @notice The hook address provided is already set on this badge.
+    error HookAlreadySet();
 
     /// @custom:oz-upgrades-unsafe-allow constructor
     constructor() {
@@ -380,6 +382,7 @@ contract SocietyProtocolBadges is
      */
     function setBadgeHook(uint256 id, address hook) external {
         if (!canEdit[id][msg.sender]) revert Unauthorized();
+        if (badges[id].hook == hook) revert HookAlreadySet();
         badges[id].hook = hook;
         emit HookUpdated(id, hook);
     }
