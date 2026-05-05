@@ -48,6 +48,8 @@ contract SocietyVipManager is
 
     /// @notice The minimum duration required for the stake to be locked.
     uint256 public constant MIN_LOCK_DURATION = 30 days;
+    /// @notice The maximum allowed lock duration.
+    uint256 public constant MAX_LOCK_DURATION = 4 * 365 days;
 
     /**
      * @dev Struct to store user locking information.
@@ -101,6 +103,8 @@ contract SocietyVipManager is
     error LockAlreadyActive();
     /// @notice Error thrown when upgradeTier is called with the same or a lower tier.
     error CannotDowngradeTier();
+    /// @notice Error thrown when the requested lock duration exceeds the maximum allowed.
+    error LockDurationTooLong();
 
     // -------------------------------------------------------------------------
     // Events
@@ -201,6 +205,7 @@ contract SocietyVipManager is
     function lock(uint256 tierId, uint256 duration) external {
         uint256 amount = _tierAmount(tierId); // also validates tierId
         if (duration < MIN_LOCK_DURATION) revert LockDurationTooShort();
+        if (duration > MAX_LOCK_DURATION) revert LockDurationTooLong();
 
         LockInfo storage userLock = locks[msg.sender];
 
@@ -275,7 +280,7 @@ contract SocietyVipManager is
         uint256 tierId,
         uint256 duration
     ) external onlyOwner {
-        if (tierId == 0) revert InvalidTierAmounts();
+        if (tierId == 0 || tierId > 3) revert InvalidTier();
         if (duration == 0) revert LockDurationTooShort();
 
         uint256 expiry = block.timestamp + duration;

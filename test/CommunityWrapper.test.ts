@@ -181,6 +181,12 @@ describe("CommunityWrapper and Upgradeable Factory", function () {
             await factory.setWrapperImplementation(await newImpl.getAddress());
             expect(await factory.wrapperImplementation()).to.equal(await newImpl.getAddress());
         });
+
+        it("Should revert setWrapperImplementation with an EOA address (no code)", async function () {
+            await expect(
+                factory.setWrapperImplementation(owner.address)
+            ).to.be.revertedWith("Implementation must be a contract");
+        });
     });
 
     describe("CommunityWrapper Edge Cases (Cloned)", function () {
@@ -201,10 +207,12 @@ describe("CommunityWrapper and Upgradeable Factory", function () {
             expect(await wrapper.totalSupply()).to.equal(0);
         });
 
-        it("Should revert on transfer and transferFrom", async function () {
+        it("Should revert on transfer, transferFrom, and approve", async function () {
             await expect(wrapper.transfer(user1.address, 1))
                 .to.be.revertedWithCustomError(wrapper, "TransfersDisabled");
             await expect(wrapper.transferFrom(owner.address, user1.address, 1))
+                .to.be.revertedWithCustomError(wrapper, "TransfersDisabled");
+            await expect(wrapper.approve(user1.address, 1))
                 .to.be.revertedWithCustomError(wrapper, "TransfersDisabled");
         });
 

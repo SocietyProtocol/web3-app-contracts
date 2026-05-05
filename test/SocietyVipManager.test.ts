@@ -198,6 +198,13 @@ describe("Society VIP Manager", function () {
             ).to.be.revertedWithCustomError(vipManager, "LockDurationTooShort");
         });
 
+        it("Should revert with LockDurationTooLong if duration exceeds MAX_LOCK_DURATION", async function () {
+            const fourYearsPlusOne = 4 * 365 * 24 * 3600 + 1;
+            await expect(
+                vipManager.connect(user1).lock(TIER_BRONZE, fourYearsPlusOne)
+            ).to.be.revertedWithCustomError(vipManager, "LockDurationTooLong");
+        });
+
         it("Should revert with LockAlreadyActive when locking with an active lock", async function () {
             await vipManager.connect(user1).lock(TIER_BRONZE, ONE_MONTH);
             await expect(
@@ -362,10 +369,16 @@ describe("Society VIP Manager", function () {
             ).to.be.revertedWithCustomError(vipManager, "OwnableUnauthorizedAccount");
         });
 
-        it("reverts with InvalidTierAmounts when tierId is 0", async function () {
+        it("reverts with InvalidTier when tierId is 0", async function () {
             await expect(
                 vipManager.grantCommunityTier(communityId, 0, ONE_YEAR)
-            ).to.be.revertedWithCustomError(vipManager, "InvalidTierAmounts");
+            ).to.be.revertedWithCustomError(vipManager, "InvalidTier");
+        });
+
+        it("reverts with InvalidTier when tierId > 3", async function () {
+            await expect(
+                vipManager.grantCommunityTier(communityId, 4, ONE_YEAR)
+            ).to.be.revertedWithCustomError(vipManager, "InvalidTier");
         });
 
         it("reverts with LockDurationTooShort when duration is 0", async function () {

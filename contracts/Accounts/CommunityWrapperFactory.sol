@@ -54,7 +54,7 @@ contract CommunityWrapperFactory is
         __UUPSUpgradeable_init();
 
         require(_badgeContract != address(0), "Invalid badge contract");
-        require(_wrapperImplementation != address(0), "Invalid implementation");
+        require(_wrapperImplementation.code.length > 0, "Implementation must be a contract");
 
         badgeContract = _badgeContract;
         wrapperImplementation = _wrapperImplementation;
@@ -68,7 +68,7 @@ contract CommunityWrapperFactory is
     function setWrapperImplementation(
         address _newImplementation
     ) external onlyOwner {
-        require(_newImplementation != address(0), "Invalid implementation");
+        require(_newImplementation.code.length > 0, "Implementation must be a contract");
         wrapperImplementation = _newImplementation;
         emit ImplementationUpdated(_newImplementation);
     }

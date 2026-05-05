@@ -147,4 +147,12 @@ contract CommunityWrapper is
     ) public pure override returns (bool) {
         revert TransfersDisabled();
     }
+
+    /**
+     * @notice Approvals are disabled since transfers are disabled.
+     * @dev Always reverts with `TransfersDisabled`.
+     */
+    function approve(address, uint256) public pure override returns (bool) {
+        revert TransfersDisabled();
+    }
 }
