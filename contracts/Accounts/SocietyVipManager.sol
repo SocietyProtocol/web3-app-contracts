@@ -53,10 +53,12 @@ contract SocietyVipManager is
 
     /**
      * @dev Struct to store user locking information.
+     * @param tierId The tier the user locked into: 1 = Bronze, 2 = Silver, 3 = Gold. Snapshot at lock time.
      * @param amount The total amount of staking tokens locked by the user.
      * @param unlockTime The timestamp when the lock expires and tokens can be withdrawn.
      */
     struct LockInfo {
+        uint256 tierId;
         uint256 amount;
         uint256 unlockTime;
     }
@@ -217,6 +219,7 @@ contract SocietyVipManager is
             }
         }
 
+        userLock.tierId = tierId;
         userLock.amount = amount;
         userLock.unlockTime = block.timestamp + duration;
 
@@ -239,6 +242,7 @@ contract SocietyVipManager is
         if (newAmount <= userLock.amount) revert CannotDowngradeTier();
 
         uint256 topUp = newAmount - userLock.amount;
+        userLock.tierId = newTierId;
         userLock.amount = newAmount;
 
         stakingToken.safeTransferFrom(msg.sender, address(this), topUp);
@@ -254,6 +258,7 @@ contract SocietyVipManager is
         if (block.timestamp < userLock.unlockTime) revert LockStillActive();
 
         uint256 amount = userLock.amount;
+        userLock.tierId = 0;
         userLock.amount = 0;
         userLock.unlockTime = 0;
 
@@ -339,11 +344,13 @@ contract SocietyVipManager is
      */
     function onBalanceOf(address account, uint256 id) external view returns (uint256) {
         LockInfo storage userLock = locks[account];
-        if (block.timestamp >= userLock.unlockTime || userLock.amount == 0) return 0;
+        if (block.timestamp >= userLock.unlockTime || userLock.tierId == 0) return 0;
 
-        if (id == goldBadgeId)   return userLock.amount >= goldAmount   ? 1 : 0;
-        if (id == silverBadgeId) return userLock.amount >= silverAmount ? 1 : 0;
-        if (id == bronzeBadgeId) return userLock.amount >= bronzeAmount ? 1 : 0;
+        // Tier is snapshotted at lock time — threshold changes don't demote existing locks.
+        // Higher tiers include lower-tier badges (Gold holder also qualifies as Silver and Bronze).
+        if (id == goldBadgeId)   return userLock.tierId == 3 ? 1 : 0;
+        if (id == silverBadgeId) return userLock.tierId == 2 ? 1 : 0;
+        if (id == bronzeBadgeId) return userLock.tierId == 1 ? 1 : 0;
 
         return 0;
     }

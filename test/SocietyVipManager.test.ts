@@ -101,7 +101,7 @@ describe("Society VIP Manager", function () {
         expect(await badges.balanceOf(user1.address, goldId)).to.equal(0);
     });
 
-    it("Should upgrade tiers and reflect cumulative badge balances", async function () {
+    it("Should upgrade tiers and reflect exclusive badge balances", async function () {
         const bronzeId = await vipManager.bronzeBadgeId();
         const silverId = await vipManager.silverBadgeId();
         const goldId   = await vipManager.goldBadgeId();
@@ -109,15 +109,16 @@ describe("Society VIP Manager", function () {
         await vipManager.connect(user1).lock(TIER_BRONZE, ONE_MONTH);
         expect(await badges.balanceOf(user1.address, bronzeId)).to.equal(1);
         expect(await badges.balanceOf(user1.address, silverId)).to.equal(0);
+        expect(await badges.balanceOf(user1.address, goldId)).to.equal(0);
 
         await vipManager.connect(user1).upgradeTier(TIER_SILVER);
-        expect(await badges.balanceOf(user1.address, bronzeId)).to.equal(1);
+        expect(await badges.balanceOf(user1.address, bronzeId)).to.equal(0);
         expect(await badges.balanceOf(user1.address, silverId)).to.equal(1);
         expect(await badges.balanceOf(user1.address, goldId)).to.equal(0);
 
         await vipManager.connect(user1).upgradeTier(TIER_GOLD);
-        expect(await badges.balanceOf(user1.address, bronzeId)).to.equal(1);
-        expect(await badges.balanceOf(user1.address, silverId)).to.equal(1);
+        expect(await badges.balanceOf(user1.address, bronzeId)).to.equal(0);
+        expect(await badges.balanceOf(user1.address, silverId)).to.equal(0);
         expect(await badges.balanceOf(user1.address, goldId)).to.equal(1);
     });
 
@@ -156,6 +157,22 @@ describe("Society VIP Manager", function () {
         await vipManager.connect(user1).lock(TIER_BRONZE, ONE_MONTH);
         const after = await stakingToken.balanceOf(user1.address);
         expect(before - after).to.equal(newBronze);
+    });
+
+    it("Tier threshold change should NOT demote an existing lock (L01 fix)", async function () {
+        const silverId = await vipManager.silverBadgeId();
+        const goldId   = await vipManager.goldBadgeId();
+
+        // user1 locks Silver
+        await vipManager.connect(user1).lock(TIER_SILVER, ONE_MONTH);
+        expect(await vipManager.onBalanceOf(user1.address, silverId)).to.equal(1n);
+
+        // Owner raises Silver threshold far above user1's locked amount
+        await vipManager.setTierAmounts(BRONZE_AMOUNT, GOLD_AMOUNT, GOLD_AMOUNT * 5n);
+
+        // user1 still reads as Silver — tier is snapshotted at lock time
+        expect(await vipManager.onBalanceOf(user1.address, silverId)).to.equal(1n);
+        expect(await vipManager.onBalanceOf(user1.address, goldId)).to.equal(0n);
     });
 
     it("Should allow unlocking after expiration", async function () {
