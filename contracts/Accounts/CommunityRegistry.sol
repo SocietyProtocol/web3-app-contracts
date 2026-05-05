@@ -168,10 +168,7 @@ contract CommunityRegistry is Initializable, OwnableUpgradeable, UUPSUpgradeable
         uint256 creatorBadgeId = _createCreatorBadge(string.concat(name, " Creator"), creatorBadgeURI);
         uint256 memberBadgeId  = _createMemberBadge(string.concat(name, " Member"), memberBadgeURI, creatorBadgeId);
 
-        // Mint creator badge and one member badge to the caller (privileged via COMMUNITY_MANAGER_ROLE)
-        badges.mint(msg.sender, creatorBadgeId, 1, "");
-        badges.mint(msg.sender, memberBadgeId,  1, "");
-
+        // Effects — write state before any external calls that trigger onERC1155Received (CEI)
         communityId = creatorBadgeId;
         ++communityCount;
         communities[communityId] = Community({
@@ -181,6 +178,10 @@ contract CommunityRegistry is Initializable, OwnableUpgradeable, UUPSUpgradeable
             wrapper: address(0),
             createdAt: block.timestamp
         });
+
+        // Interactions — mint after state is finalised
+        badges.mint(msg.sender, creatorBadgeId, 1, "");
+        badges.mint(msg.sender, memberBadgeId,  1, "");
 
         emit CommunityCreated(communityId, msg.sender, memberBadgeId);
     }
