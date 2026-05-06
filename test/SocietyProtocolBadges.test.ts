@@ -98,7 +98,7 @@ describe("Society Protocol Badges (Upgradeable) - Refactored", function () {
             const id = STARTING_BADGE_ID + 1n;
             const badge = await badges.badges(id);
             expect(badge.name).to.equal("Public Badge");
-            expect(badge.isCommunity).to.be.true;
+            expect(badge.isCommunityBadge).to.be.true;
         });
 
         it("Non-official creator should NOT be able to create official badges", async function () {

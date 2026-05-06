@@ -61,7 +61,7 @@ describe("CommunityWrapper and Upgradeable Factory", function () {
                 "Test Community",
                 "TCM",
                 [ID1],
-                ID1 // creatorBadgeId
+                ID1 // managerBadgeId
             );
             const receipt = await tx.wait();
 
@@ -71,7 +71,7 @@ describe("CommunityWrapper and Upgradeable Factory", function () {
             const wrapper = await ethers.getContractAt("CommunityWrapper", wrapperAddress);
             expect(await wrapper.name()).to.equal("Test Community");
             expect(await wrapper.symbol()).to.equal("TCM");
-            expect(await wrapper.creatorBadgeId()).to.equal(ID1);
+            expect(await wrapper.managerBadgeId()).to.equal(ID1);
 
             const allowedIds = await wrapper.getAllowedBadgeIds();
             expect(allowedIds.length).to.equal(1);

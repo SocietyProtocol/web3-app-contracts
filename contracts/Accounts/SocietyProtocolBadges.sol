@@ -57,14 +57,14 @@ contract SocietyProtocolBadges is
      * @param name Human-readable name of the badge.
      * @param hook Optional address of a contract implementing ISocietyBadgeHook for dynamic logic.
      * @param isOfficial True if the badge is an official protocol-level badge.
-     * @param isCommunity True if the badge has community-specific properties.
+     * @param isCommunityBadge True if the badge has community-specific properties.
      * @param metadataURI The IPFS or HTTPS link to the badge's metadata.
      */
     struct BadgeInfo {
         string name;
         address hook;
         bool isOfficial;
-        bool isCommunity;
+        bool isCommunityBadge;
         string metadataURI;
     }
 
@@ -118,14 +118,14 @@ contract SocietyProtocolBadges is
      * @param id The unique ID assigned to the new badge.
      * @param name human-readable name of the badge.
      * @param isOfficial True if created as an official badge.
-     * @param isCommunity True if created as a community badge.
+     * @param isCommunityBadge True if created as a community badge.
      * @param creator The address that initiated the creation.
      */
     event BadgeCreated(
         uint256 indexed id,
         string name,
         bool isOfficial,
-        bool isCommunity,
+        bool isCommunityBadge,
         address indexed creator
     );
     /**
@@ -135,7 +135,7 @@ contract SocietyProtocolBadges is
         uint256 indexed id,
         string name,
         bool isOfficial,
-        bool isCommunity,
+        bool isCommunityBadge,
         string metadataURI
     );
     /**
@@ -227,7 +227,7 @@ contract SocietyProtocolBadges is
      * @notice Creates a new badge type with specific metadata and permissions.
      * @param name Human-readable name.
      * @param isOfficial If true, requires the caller to have `OFFICIAL_BADGE_CREATOR_ROLE`.
-     * @param isCommunity Flag for community categorization.
+     * @param isCommunityBadge Flag for community categorization.
      * @param hook Address of the custom logic contract (optional).
      * @param metadataURI IPFS/HTTPS link to metadata.
      * @param minters Array of IDs/constants allowed to mint.
@@ -239,7 +239,7 @@ contract SocietyProtocolBadges is
     function createBadge(
         string memory name,
         bool isOfficial,
-        bool isCommunity,
+        bool isCommunityBadge,
         address hook,
         string memory metadataURI,
         uint256[] memory minters,
@@ -256,7 +256,7 @@ contract SocietyProtocolBadges is
                 );
             }
         }
-        if (isCommunity) {
+        if (isCommunityBadge) {
             if (!hasRole(COMMUNITY_MANAGER_ROLE, msg.sender)) {
                 revert AccessControlUnauthorizedAccount(
                     msg.sender,
@@ -268,7 +268,7 @@ contract SocietyProtocolBadges is
             _createBadge(
                 name,
                 isOfficial,
-                isCommunity,
+                isCommunityBadge,
                 hook,
                 metadataURI,
                 minters,
@@ -334,7 +334,7 @@ contract SocietyProtocolBadges is
     function _createBadge(
         string memory name,
         bool isOfficial,
-        bool isCommunity,
+        bool isCommunityBadge,
         address hook,
         string memory metadataURI,
         uint256[] memory minters,
@@ -353,7 +353,7 @@ contract SocietyProtocolBadges is
             name: name,
             hook: hook,
             isOfficial: isOfficial,
-            isCommunity: isCommunity,
+            isCommunityBadge: isCommunityBadge,
             metadataURI: metadataURI
         });
 
@@ -371,7 +371,7 @@ contract SocietyProtocolBadges is
             emit EditorsUpdated(id, editors[i], true);
         }
 
-        emit BadgeCreated(id, name, isOfficial, isCommunity, msg.sender);
+        emit BadgeCreated(id, name, isOfficial, isCommunityBadge, msg.sender);
         emit BadgePermissions(id, minters, transferers, burners, editors);
         return id;
     }
@@ -391,7 +391,7 @@ contract SocietyProtocolBadges is
     /**
      * @notice Modifies a badge's name, official status, and URI.
      * @dev Toggling official status requires `OFFICIAL_BADGE_CREATOR_ROLE`.
-     *      The `isCommunity` flag is immutable after badge creation.
+     *      The `isCommunityBadge` flag is immutable after badge creation.
      */
     function modifyBadge(
         uint256 id,
@@ -421,7 +421,7 @@ contract SocietyProtocolBadges is
         badge.isOfficial = isOfficial;
         badge.metadataURI = metadataURI;
 
-        emit BadgeModified(id, name, isOfficial, badge.isCommunity, metadataURI);
+        emit BadgeModified(id, name, isOfficial, badge.isCommunityBadge, metadataURI);
         emit URI(metadataURI, id);
     }
 
@@ -668,6 +668,11 @@ contract SocietyProtocolBadges is
         return canBurn[id];
     }
 
+    /// @notice Returns true if the badge was created as a community-owned badge via the registry.
+    function getIsCommunityBadge(uint256 id) external view returns (bool) {
+        return badges[id].isCommunityBadge;
+    }
+
     /**
      * @notice Overridden internal update hook to enforce all badge permissions.
      * @dev This is the central security mechanism. It checks:
@@ -737,10 +742,10 @@ contract SocietyProtocolBadges is
                     rules = canTransfer[id];
                 }
 
-                // CommunityRegistry can mint isCommunity badges without permission checks
+                // CommunityRegistry can mint isCommunityBadge badges without permission checks
                 bool allowed = from == address(0)
                     && hasRole(COMMUNITY_MANAGER_ROLE, msg.sender)
-                    && badges[id].isCommunity;
+                    && badges[id].isCommunityBadge;
                 for (uint256 j = 0; j < rules.length; j++) {
                     uint256 rule = rules[j];
 

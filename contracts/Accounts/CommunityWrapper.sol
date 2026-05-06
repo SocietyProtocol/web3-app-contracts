@@ -19,8 +19,9 @@ contract CommunityWrapper is
 {
     /// @notice The contract address of the SocietyProtocolBadges ERC1155.
     address public badgeContract;
-    /// @notice The badge ID that grants admin rights over this wrapper. Whoever holds it is the owner.
-    uint256 public creatorBadgeId;
+    /// @notice The badge ID that grants admin rights over this wrapper. Whoever holds it is the manager.
+    ///         Set to 0 for immutable standalone governance wrappers (nobody can call setBadgeIds).
+    uint256 public managerBadgeId;
     /// @notice The badge IDs whose balances are summed to produce a user's wrapper balance.
     uint256[] public allowedBadgeIds;
     /// @notice The maximum number of badge IDs that can be required for membership.
@@ -38,8 +39,8 @@ contract CommunityWrapper is
         _disableInitializers();
     }
 
-    modifier onlyCreator() {
-        if (IERC1155(badgeContract).balanceOf(msg.sender, creatorBadgeId) == 0) revert Unauthorized();
+    modifier onlyManager() {
+        if (IERC1155(badgeContract).balanceOf(msg.sender, managerBadgeId) == 0) revert Unauthorized();
         _;
     }
 
@@ -49,14 +50,15 @@ contract CommunityWrapper is
      * @param symbol The ERC20 symbol (e.g., "DEVC").
      * @param _badgeContract The address of the main Badge contract.
      * @param _initialBadgeIds The initial list of badge IDs required for membership.
-     * @param _creatorBadgeId The badge ID whose holder has admin rights. Ownership follows the badge.
+     * @param _managerBadgeId The badge ID whose holder has admin rights. Ownership follows the badge.
+     *                        Pass 0 for an immutable governance wrapper — nobody can call setBadgeIds.
      */
     function initialize(
         string memory name,
         string memory symbol,
         address _badgeContract,
         uint256[] memory _initialBadgeIds,
-        uint256 _creatorBadgeId
+        uint256 _managerBadgeId
     ) public initializer {
         __ERC20_init(name, symbol);
 
@@ -64,7 +66,7 @@ contract CommunityWrapper is
         if (_initialBadgeIds.length > MAX_BADGES) revert MaxBadgesReached();
 
         badgeContract = _badgeContract;
-        creatorBadgeId = _creatorBadgeId;
+        managerBadgeId = _managerBadgeId;
 
         // Deduplicate initial badge IDs
         for (uint256 i = 0; i < _initialBadgeIds.length; i++) {
@@ -82,7 +84,7 @@ contract CommunityWrapper is
      * @dev Duplicates in the input are silently ignored. Only callable by the creator badge holder.
      * @param newBadgeIds The new set of badge IDs required for membership.
      */
-    function setBadgeIds(uint256[] calldata newBadgeIds) external onlyCreator {
+    function setBadgeIds(uint256[] calldata newBadgeIds) external onlyManager {
         if (newBadgeIds.length > MAX_BADGES) revert MaxBadgesReached();
         delete allowedBadgeIds;
         for (uint256 i = 0; i < newBadgeIds.length; i++) {
