@@ -603,7 +603,7 @@ contract SocietyProtocolBadges is
     }
 
     /**
-     * @notice Accepts an invitation signed by an existing protocol user.
+     * @notice Accepts an invitation signed by an inviter.
      * @dev Caller must be the invitee encoded in the signature — cannot be forwarded.
      * @param inviter  Address that created and signed the invite.
      * @param nonce    Unique value chosen by the inviter; allows multiple pending invites.

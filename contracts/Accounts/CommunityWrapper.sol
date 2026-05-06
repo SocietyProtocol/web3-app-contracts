@@ -81,7 +81,7 @@ contract CommunityWrapper is
 
     /**
      * @notice Replaces the entire membership badge list.
-     * @dev Duplicates in the input are silently ignored. Only callable by the creator badge holder.
+     * @dev Duplicates in the input are silently ignored. Only callable by the manager badge holder.
      * @param newBadgeIds The new set of badge IDs required for membership.
      */
     function setBadgeIds(uint256[] calldata newBadgeIds) external onlyManager {

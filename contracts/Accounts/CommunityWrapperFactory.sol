@@ -78,6 +78,7 @@ contract CommunityWrapperFactory is
      * @param name The name for the new ERC20 wrapper.
      * @param symbol The symbol for the new ERC20 wrapper.
      * @param initialBadgeIds The set of badge IDs that will define membership for this community.
+     * @param managerBadgeId The badge ID whose holder will manage the wrapper after deployment.
      * @return clone The address of the newly created wrapper proxy.
      */
     function createWrapper(

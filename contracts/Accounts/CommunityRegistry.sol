@@ -151,7 +151,7 @@ contract CommunityRegistry is Initializable, OwnableUpgradeable, UUPSUpgradeable
      *        - canMint: [] — no one can mint additional manager badges directly; the registry
      *                        mints the first one via COMMUNITY_MANAGER_ROLE on creation.
      *        - canTransfer: [PERM_SELF] — only the current holder can transfer (e.g. to a Safe).
-     *        - canBurn: [] — no direct burn; holder can transfer to address(0) to destroy.
+     *        - canBurn: [] — non-burnable through the exposed public flows.
      *
      *      Assistant badge permissions:
      *        - canMint: [managerBadgeId] — only the Manager badge holder can assign assistants.

@@ -14,9 +14,9 @@ import "./SocietyProtocolBadges.sol";
  * @notice Manages personal VIP tiers (Bronze, Silver, Gold) via staking, and community tiers via
  *         owner-granted time-limited grants.
  * @dev Implements ISocietyBadgeHook for personal VIP badges only.
- *      Community tiers are stored in a plain mapping and queried via getCommunityTier(communityId).
- *      To check whether a specific address holds a community tier, call getCommunityTier(communityId)
- *      and verify they hold the creator badge via badges.balanceOf(account, communityId) > 0.
+ *      Community tiers are stored in a plain mapping keyed by communityId (= manager badge ID) and
+ *      queried via getCommunityTier(communityId). Each active grant also assigns a representative
+ *      whose VIP badge visibility is surfaced through onBalanceOf() for the duration of the grant.
  */
 contract SocietyVipManager is
     Initializable,
@@ -364,9 +364,7 @@ contract SocietyVipManager is
     /**
      * @notice Returns the active community tier for a given community.
      * @dev Returns (0, 0) if the community has no grant or the grant has expired.
-     *      Pair with badges.balanceOf(account, communityId) > 0 to confirm the queried
-     *      address currently holds the creator badge.
-     * @param communityId The community to query (= creator badge ID).
+     * @param communityId The community to query (= manager badge ID).
      * @return tierId The active tier identifier, or 0 if none.
      * @return expiry The unix timestamp when the tier expires, or 0 if none.
      */
