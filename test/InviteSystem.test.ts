@@ -2,16 +2,19 @@ import { expect } from "chai";
 import { ethers, upgrades } from "hardhat";
 import { SocietyProtocolBadges } from "../typechain-types";
 import { SignerWithAddress } from "@nomicfoundation/hardhat-ethers/signers";
+import { time } from "@nomicfoundation/hardhat-network-helpers";
 
-describe("Society Protocol Badges - Invite System", function () {
+describe("SocietyProtocolBadges - Invite System", function () {
     let badges: SocietyProtocolBadges;
     let owner: SignerWithAddress;
     let inviter: SignerWithAddress;
-    let guest: SignerWithAddress;
+    let invitee: SignerWithAddress;
     let other: SignerWithAddress;
 
+    const SEVEN_DAYS = 7 * 24 * 60 * 60;
+
     beforeEach(async function () {
-        [owner, inviter, guest, other] = await ethers.getSigners();
+        [owner, inviter, invitee, other] = await ethers.getSigners();
 
         const Badges = await ethers.getContractFactory("SocietyProtocolBadges");
         badges = (await upgrades.deployProxy(Badges, [], {
@@ -20,169 +23,137 @@ describe("Society Protocol Badges - Invite System", function () {
         await badges.waitForDeployment();
     });
 
-    async function getInviteSignature(
+    // ─── Helpers ──────────────────────────────────────────────────────────────
+
+    async function signInvite(
         signer: SignerWithAddress,
         inviterAddr: string,
-        guestAddr: string,
-        message?: string
-    ) {
+        inviteeAddr: string,
+        nonce: bigint,
+        expiry: bigint
+    ): Promise<string> {
         const domain = {
             name: "SocietyProtocol",
             version: "1",
             chainId: (await ethers.provider.getNetwork()).chainId,
             verifyingContract: await badges.getAddress(),
         };
-
         const types = {
             Invite: [
-                { name: "inviter", type: "address" },
-                { name: "message", type: "string" },
+                { name: "inviter",  type: "address" },
+                { name: "invitee",  type: "address" },
+                { name: "nonce",    type: "uint256" },
+                { name: "expiry",   type: "uint256" },
             ],
         };
-
-        const defaultMessage = `Sign this message to generate a referral code for the address: ${guestAddr.toLowerCase()}`;
-        const finalMessage = message ?? defaultMessage;
-
-        const value = {
-            inviter: inviterAddr,
-            message: finalMessage,
-        };
-
-        const signature = await signer.signTypedData(domain, types, value);
-        return { signature, message: finalMessage };
+        return signer.signTypedData(domain, types, { inviter: inviterAddr, invitee: inviteeAddr, nonce, expiry });
     }
 
-    it("Should allow a user to accept a valid invite with production message", async function () {
-        const { signature, message } = await getInviteSignature(
-            inviter,
-            inviter.address,
-            guest.address
-        );
+    async function makeInvite(
+        signer: SignerWithAddress,
+        inviteeAddr: string,
+        nonce: bigint = 1n,
+        durationSeconds: number = SEVEN_DAYS
+    ) {
+        const expiry = BigInt(await time.latest()) + BigInt(durationSeconds);
+        const signature = await signInvite(signer, signer.address, inviteeAddr, nonce, expiry);
+        return { nonce, expiry, signature };
+    }
 
-        // message: "Sign this message to generate a referral code for the address: <guest>"
-        await expect(badges.connect(guest).acceptInvite(inviter.address, message, signature))
-            .to.emit(badges, "UserInvited")
-            .withArgs(guest.address, inviter.address);
+    // ─── Happy path ───────────────────────────────────────────────────────────
 
-        expect(await badges.invitedBy(guest.address)).to.equal(inviter.address);
-    });
-
-    it("Should allow a user to accept an invite with a custom message prefix (as long as it ends with guest address)", async function () {
-        const customMessage = `Welcome to the Society! Please accept this invite for: ${guest.address.toLowerCase()}`;
-        const { signature, message } = await getInviteSignature(
-            inviter,
-            inviter.address,
-            guest.address,
-            customMessage
-        );
-
-        await expect(badges.connect(guest).acceptInvite(inviter.address, message, signature))
-            .to.emit(badges, "UserInvited")
-            .withArgs(guest.address, inviter.address);
-
-        expect(await badges.invitedBy(guest.address)).to.equal(inviter.address);
-    });
-
-    it("Should reject an invite with an invalid signature (wrong signer)", async function () {
-        const { signature, message } = await getInviteSignature(
-            other,
-            inviter.address,
-            guest.address
-        );
-
+    it("accepts a valid invite and emits UserInvited", async function () {
+        const { nonce, expiry, signature } = await makeInvite(inviter, invitee.address);
         await expect(
-            badges.connect(guest).acceptInvite(inviter.address, message, signature)
+            badges.connect(invitee).acceptInvite(inviter.address, nonce, expiry, signature)
+        ).to.emit(badges, "UserInvited").withArgs(inviter.address, invitee.address, nonce);
+
+        expect(await badges.hasInvited(inviter.address, invitee.address)).to.be.true;
+    });
+
+    it("records invitee in getInvitees", async function () {
+        const { nonce, expiry, signature } = await makeInvite(inviter, invitee.address);
+        await badges.connect(invitee).acceptInvite(inviter.address, nonce, expiry, signature);
+
+        const invitees = await badges.getInvitees(inviter.address);
+        expect(invitees).to.deep.equal([invitee.address]);
+    });
+
+    it("one inviter can invite multiple addresses with different nonces", async function () {
+        const inv1 = await makeInvite(inviter, invitee.address, 1n);
+        const inv2 = await makeInvite(inviter, other.address,   2n);
+
+        await badges.connect(invitee).acceptInvite(inviter.address, inv1.nonce, inv1.expiry, inv1.signature);
+        await badges.connect(other).acceptInvite(inviter.address,   inv2.nonce, inv2.expiry, inv2.signature);
+
+        const invitees = await badges.getInvitees(inviter.address);
+        expect(invitees.length).to.equal(2);
+        expect(invitees).to.include(invitee.address);
+        expect(invitees).to.include(other.address);
+    });
+
+    // ─── Expiry ───────────────────────────────────────────────────────────────
+
+    it("reverts with SignatureExpired when past expiry", async function () {
+        const { nonce, expiry, signature } = await makeInvite(inviter, invitee.address, 1n, 60);
+        await time.increase(61);
+        await expect(
+            badges.connect(invitee).acceptInvite(inviter.address, nonce, expiry, signature)
+        ).to.be.revertedWithCustomError(badges, "SignatureExpired");
+    });
+
+    it("accepts an invite exactly at expiry boundary", async function () {
+        const { nonce, expiry, signature } = await makeInvite(inviter, invitee.address, 1n, SEVEN_DAYS);
+        await time.setNextBlockTimestamp(expiry);
+        await expect(
+            badges.connect(invitee).acceptInvite(inviter.address, nonce, expiry, signature)
+        ).to.not.be.reverted;
+    });
+
+    // ─── Signature validation ─────────────────────────────────────────────────
+
+    it("reverts with InvalidSignature when signed by wrong address", async function () {
+        const { nonce, expiry, signature } = await makeInvite(other, invitee.address);
+        await expect(
+            badges.connect(invitee).acceptInvite(inviter.address, nonce, expiry, signature)
         ).to.be.revertedWithCustomError(badges, "InvalidSignature");
     });
 
-    it("Should reject an invite intended for another guest (address mismatch in message)", async function () {
-        // Signer signs a message for 'other', but 'guest' tries to use it.
-        const { signature, message } = await getInviteSignature(
-            inviter,
-            inviter.address,
-            other.address
-        );
-
+    it("reverts with InvalidSignature when a different invitee tries to use the signature", async function () {
+        const { nonce, expiry, signature } = await makeInvite(inviter, invitee.address);
         await expect(
-            badges.connect(guest).acceptInvite(inviter.address, message, signature)
+            badges.connect(other).acceptInvite(inviter.address, nonce, expiry, signature)
         ).to.be.revertedWithCustomError(badges, "InvalidSignature");
     });
 
-    it("Should reject an invite if the message body doesn't end with guest's address", async function () {
-        const { signature } = await getInviteSignature(
-            inviter,
-            inviter.address,
-            guest.address
-        );
-        const wrongMessage = `This message ends with someone else: ${other.address.toLowerCase()}`;
+    // ─── Replay & duplicates ──────────────────────────────────────────────────
 
+    it("reverts with NonceAlreadyUsed on replay with same nonce", async function () {
+        const { nonce, expiry, signature } = await makeInvite(inviter, invitee.address, 1n);
+        await badges.connect(invitee).acceptInvite(inviter.address, nonce, expiry, signature);
+
+        const sig2 = await signInvite(inviter, inviter.address, other.address, nonce, expiry);
         await expect(
-            badges.connect(guest).acceptInvite(inviter.address, wrongMessage, signature)
-        ).to.be.revertedWithCustomError(badges, "InvalidSignature");
+            badges.connect(other).acceptInvite(inviter.address, nonce, expiry, sig2)
+        ).to.be.revertedWithCustomError(badges, "NonceAlreadyUsed");
     });
 
-    it("Should reject an invite with the wrong inviter address provided", async function () {
-        const { signature, message } = await getInviteSignature(
-            inviter,
-            inviter.address,
-            guest.address
-        );
+    it("reverts with AlreadyInvited when same pair accepts twice", async function () {
+        const inv1 = await makeInvite(inviter, invitee.address, 1n);
+        await badges.connect(invitee).acceptInvite(inviter.address, inv1.nonce, inv1.expiry, inv1.signature);
 
+        const inv2 = await makeInvite(inviter, invitee.address, 2n);
         await expect(
-            badges.connect(guest).acceptInvite(owner.address, message, signature)
-        ).to.be.revertedWithCustomError(badges, "InvalidSignature");
-    });
-
-    it("Should reject duplicate invite acceptance", async function () {
-        const { signature: signature1, message: message1 } = await getInviteSignature(
-            inviter,
-            inviter.address,
-            guest.address
-        );
-        await badges.connect(guest).acceptInvite(inviter.address, message1, signature1);
-
-        const { signature: signature2, message: message2 } = await getInviteSignature(
-            other,
-            other.address,
-            guest.address
-        );
-        await expect(
-            badges.connect(guest).acceptInvite(other.address, message2, signature2)
+            badges.connect(invitee).acceptInvite(inviter.address, inv2.nonce, inv2.expiry, inv2.signature)
         ).to.be.revertedWithCustomError(badges, "AlreadyInvited");
     });
 
-    it("Should reject self-invitation", async function () {
-        const { signature, message } = await getInviteSignature(
-            guest,
-            guest.address,
-            guest.address
-        );
+    // ─── Self-invite ──────────────────────────────────────────────────────────
 
+    it("reverts with SelfInvitation when inviter == invitee", async function () {
+        const { nonce, expiry, signature } = await makeInvite(inviter, inviter.address);
         await expect(
-            badges.connect(guest).acceptInvite(guest.address, message, signature)
+            badges.connect(inviter).acceptInvite(inviter.address, nonce, expiry, signature)
         ).to.be.revertedWithCustomError(badges, "SelfInvitation");
-    });
-
-    it("User's frontend uses signMessage", async function () {
-        const message = `Sign this message to generate a referral code for the address: ${guest.address.toLowerCase()}`;
-
-        // Frontend uses signMessage (Personal Sign) -> produce EthSignedMessageHash
-        const signature = await owner.signMessage(message);
-
-        // Verify
-        await badges.connect(guest).acceptInvite(owner.address, message, signature);
-        expect(await badges.invitedBy(guest.address)).to.equal(owner.address);
-    });
-
-    it("Should reject circular invitation", async function () {
-        // Step 1: inviter invites guest
-        const invite1 = await getInviteSignature(inviter, inviter.address, guest.address);
-        await badges.connect(guest).acceptInvite(inviter.address, invite1.message, invite1.signature);
-
-        // Step 2: guest invites inviter (circular)
-        const invite2 = await getInviteSignature(guest, guest.address, inviter.address);
-        await expect(
-            badges.connect(inviter).acceptInvite(guest.address, invite2.message, invite2.signature)
-        ).to.be.revertedWithCustomError(badges, "CircularInvitation");
     });
 });

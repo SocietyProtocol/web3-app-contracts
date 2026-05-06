@@ -7,9 +7,7 @@ import "@openzeppelin/contracts-upgradeable/token/ERC1155/extensions/ERC1155Supp
 import "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
 import "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
 import "@openzeppelin/contracts-upgradeable/utils/cryptography/EIP712Upgradeable.sol";
-import "@openzeppelin/contracts/utils/cryptography/SignatureChecker.sol";
-import "@openzeppelin/contracts/utils/cryptography/MessageHashUtils.sol";
-import "@openzeppelin/contracts/utils/Strings.sol";
+import "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
 import "./ISocietyBadgeHook.sol";
 
 /// @title Society Protocol Badges
@@ -44,13 +42,14 @@ contract SocietyProtocolBadges is
 
     /// @dev EIP-712 typehash for invitations.
     bytes32 private constant INVITE_TYPEHASH =
-        keccak256("Invite(address inviter,string message)");
+        keccak256("Invite(address inviter,address invitee,uint256 nonce,uint256 expiry)");
 
-    /**
-     * @notice Maps a user's address to the address of the person who invited them.
-     * @dev Used for tracking the invitation graph and preventing circular/self invitations.
-     */
-    mapping(address => address) public invitedBy;
+    /// @notice Returns true if inviter has already had their invite accepted by invitee.
+    mapping(address => mapping(address => bool)) public hasInvited;
+    /// @notice Returns true if a nonce has been consumed for a given inviter.
+    mapping(address => mapping(uint256 => bool)) public usedNonces;
+    /// @notice Ordered list of invitees per inviter.
+    mapping(address => address[]) private _invitees;
 
     /**
      * @dev Core information for a badge type.
@@ -161,7 +160,7 @@ contract SocietyProtocolBadges is
     /// @notice Emitted when a user creates their unique profile badge.
     event ProfileCreated(address indexed user, uint256 indexed id);
     /// @notice Emitted when a user successfully accepts an invitation.
-    event UserInvited(address indexed user, address indexed inviter);
+    event UserInvited(address indexed inviter, address indexed invitee, uint256 nonce);
 
     // --- Custom Errors ---
     /// @notice Generic unauthorized access error.
@@ -192,8 +191,10 @@ contract SocietyProtocolBadges is
     error InvalidSignature();
     /// @notice A user attempted to invite themselves.
     error SelfInvitation();
-    /// @notice A circular invitation was detected (e.g., A invited B, and B attempted to invite A).
-    error CircularInvitation();
+    /// @notice The invite signature has passed its expiry timestamp.
+    error SignatureExpired();
+    /// @notice This nonce has already been used by the inviter.
+    error NonceAlreadyUsed();
     /// @notice A permission rule references an ID that is not a valid constant or existing badge.
     error InvalidPermissionRule(uint256 rule);
     /// @notice A permission array exceeds the maximum allowed length.
@@ -319,11 +320,13 @@ contract SocietyProtocolBadges is
     /**
      * @dev Internal helper for badge creation logic.
      */
-    function _validateRules(uint256[] memory rules) internal view {
+    function _validateRules(uint256[] memory rules, bool allowEveryone) internal view {
         if (rules.length > MAX_PERMISSION_RULES) revert TooManyPermissionRules();
         for (uint256 i = 0; i < rules.length; i++) {
             uint256 rule = rules[i];
-            if (rule != PERM_SELF && rule != PERM_EVERYONE) {
+            if (rule == PERM_EVERYONE) {
+                if (!allowEveryone) revert InvalidPermissionRule(rule);
+            } else if (rule != PERM_SELF) {
                 if (rule < STARTING_BADGE_ID || !_badgeExists(rule)) {
                     revert InvalidPermissionRule(rule);
                 }
@@ -342,9 +345,9 @@ contract SocietyProtocolBadges is
         uint256[] memory burners,
         address[] memory editors
     ) internal returns (uint256) {
-        _validateRules(minters);
-        _validateRules(transferers);
-        _validateRules(burners);
+        _validateRules(minters, true);
+        _validateRules(transferers, false);
+        _validateRules(burners, false);
 
         nextTokenId++;
         uint256 id = nextTokenId;
@@ -601,62 +604,45 @@ contract SocietyProtocolBadges is
 
     /**
      * @notice Accepts an invitation signed by an existing protocol user.
-     * @dev This prevents bots by requiring a signature from a valid user. 
-     * Verifies that the signed message ends with the caller's hexadecimal address.
-     * @param inviter The address of the user who signed the invitation.
-     * @param message The signed string message.
-     * @param signature The EIP-712 or personal sign signature.
+     * @dev Caller must be the invitee encoded in the signature — cannot be forwarded.
+     * @param inviter  Address that created and signed the invite.
+     * @param nonce    Unique value chosen by the inviter; allows multiple pending invites.
+     * @param expiry   Unix timestamp after which the signature is no longer valid.
+     * @param signature EIP-712 signature from the inviter.
      */
     function acceptInvite(
         address inviter,
-        string calldata message,
+        uint256 nonce,
+        uint256 expiry,
         bytes calldata signature
     ) external {
-        if (invitedBy[msg.sender] != address(0)) revert AlreadyInvited();
         if (inviter == msg.sender) revert SelfInvitation();
-        if (invitedBy[inviter] == msg.sender) revert CircularInvitation();
+        if (block.timestamp > expiry) revert SignatureExpired();
+        if (usedNonces[inviter][nonce]) revert NonceAlreadyUsed();
+        if (hasInvited[inviter][msg.sender]) revert AlreadyInvited();
 
-        bytes memory msgBytes = bytes(message);
-        uint256 len = msgBytes.length;
-        if (len < 42) revert InvalidSignature();
+        bytes32 digest = _hashTypedDataV4(keccak256(abi.encode(
+            INVITE_TYPEHASH,
+            inviter,
+            msg.sender,
+            nonce,
+            expiry
+        )));
 
-        // Extract the trailing address string from the message
-        bytes memory addressBytes = new bytes(42);
-        for (uint256 i = 0; i < 42; i++) {
-            addressBytes[i] = msgBytes[len - 42 + i];
-        }
+        if (ECDSA.recover(digest, signature) != inviter) revert InvalidSignature();
 
-        // Validate that the message suffix matches the caller's address in hex
-        if (
-            keccak256(addressBytes) !=
-            keccak256(bytes(Strings.toHexString(msg.sender)))
-        ) {
-            revert InvalidSignature();
-        }
+        usedNonces[inviter][nonce] = true;
+        hasInvited[inviter][msg.sender] = true;
+        _invitees[inviter].push(msg.sender);
 
-        bytes32 structHash = keccak256(
-            abi.encode(INVITE_TYPEHASH, inviter, keccak256(bytes(message)))
-        );
-        bytes32 hash = _hashTypedDataV4(structHash);
+        emit UserInvited(inviter, msg.sender, nonce);
+    }
 
-        if (!SignatureChecker.isValidSignatureNow(inviter, hash, signature)) {
-            // Try matching against EthSignedMessageHash (personal_sign)
-            bytes32 ethSignedHash = MessageHashUtils.toEthSignedMessageHash(
-                bytes(message)
-            );
-            if (
-                !SignatureChecker.isValidSignatureNow(
-                    inviter,
-                    ethSignedHash,
-                    signature
-                )
-            ) {
-                revert InvalidSignature();
-            }
-        }
-
-        invitedBy[msg.sender] = inviter;
-        emit UserInvited(msg.sender, inviter);
+    /**
+     * @notice Returns all addresses that have accepted an invite from the given inviter.
+     */
+    function getInvitees(address inviter) external view returns (address[] memory) {
+        return _invitees[inviter];
     }
 
     /**

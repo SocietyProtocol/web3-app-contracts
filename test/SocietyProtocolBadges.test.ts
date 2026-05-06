@@ -55,8 +55,8 @@ describe("Society Protocol Badges (Upgradeable) - Refactored", function () {
                 ethers.ZeroAddress,
                 "ipfs://official",
                 [PERM_EVERYONE], // Mint
-                [PERM_EVERYONE], // Transfer
-                [PERM_EVERYONE],  // Burn
+                [PERM_SELF],     // Transfer
+                [],              // Burn
                 [creator.address] // Editors
             );
             const id = STARTING_BADGE_ID + 1n;
@@ -114,11 +114,11 @@ describe("Society Protocol Badges (Upgradeable) - Refactored", function () {
 
         beforeEach(async function () {
             // Create an "Auth" badge that everyone can mint freely
-            await badges.createBadge("Auth Badge", false, false, ethers.ZeroAddress, "ipfs://auth", [PERM_EVERYONE], [PERM_EVERYONE], [], [owner.address]);
+            await badges.createBadge("Auth Badge", false, false, ethers.ZeroAddress, "ipfs://auth", [PERM_EVERYONE], [], [], [owner.address]);
             authBadgeId = STARTING_BADGE_ID + 1n;
 
             // Create a "Gated" badge that requires holding "Auth Badge" to mint
-            await badges.createBadge("Gated Badge", false, false, ethers.ZeroAddress, "ipfs://gated", [authBadgeId], [PERM_EVERYONE], [], [owner.address]);
+            await badges.createBadge("Gated Badge", false, false, ethers.ZeroAddress, "ipfs://gated", [authBadgeId], [], [], [owner.address]);
             gatedBadgeId = STARTING_BADGE_ID + 2n;
         });
 
@@ -228,7 +228,7 @@ describe("Society Protocol Badges (Upgradeable) - Refactored", function () {
         it("Should return correct permissions via getters", async function () {
             const minters = [PERM_EVERYONE, PERM_SELF];
             const transferers = [PERM_SELF];
-            const burners = [PERM_EVERYONE];
+            const burners = [PERM_SELF];
             const editors = [owner.address, creator.address];
 
             await badges.connect(creator).createBadge(
@@ -546,11 +546,25 @@ describe("Society Protocol Badges (Upgradeable) - Refactored", function () {
             ).to.be.revertedWithCustomError(badges, "InvalidPermissionRule");
         });
 
-        it("Should allow createBadge with PERM_SELF and PERM_EVERYONE rules", async function () {
+        it("Should allow createBadge with PERM_EVERYONE in mint and PERM_SELF elsewhere", async function () {
             await expect(
                 badges.createBadge("Open Badge", false, false, ethers.ZeroAddress, "ipfs://open",
-                    [PERM_EVERYONE], [PERM_SELF], [PERM_EVERYONE], [owner.address])
+                    [PERM_EVERYONE], [PERM_SELF], [PERM_SELF], [owner.address])
             ).to.not.be.reverted;
+        });
+
+        it("Should revert if PERM_EVERYONE is used in transfer rules", async function () {
+            await expect(
+                badges.createBadge("Bad Transfer", false, false, ethers.ZeroAddress, "ipfs://bad",
+                    [], [PERM_EVERYONE], [], [owner.address])
+            ).to.be.revertedWithCustomError(badges, "InvalidPermissionRule");
+        });
+
+        it("Should revert if PERM_EVERYONE is used in burn rules", async function () {
+            await expect(
+                badges.createBadge("Bad Burn", false, false, ethers.ZeroAddress, "ipfs://bad",
+                    [], [], [PERM_EVERYONE], [owner.address])
+            ).to.be.revertedWithCustomError(badges, "InvalidPermissionRule");
         });
 
         it("Should allow createBadge using an existing badge ID as a rule", async function () {
