@@ -7,6 +7,7 @@ import "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
 import "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
 import "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
 import "./ISocietyBadgeHook.sol";
+import "./SocietyProtocolBadges.sol";
 
 /**
  * @title Society VIP Manager
@@ -28,6 +29,9 @@ contract SocietyVipManager is
     // -------------------------------------------------------------------------
     // Personal VIP state
     // -------------------------------------------------------------------------
+
+    /// @notice The Society Protocol Badges contract.
+    SocietyProtocolBadges public badges;
 
     /// @notice The ERC20 token used for staking.
     IERC20 public stakingToken;
@@ -74,13 +78,15 @@ contract SocietyVipManager is
      * @dev Stores an owner-granted community tier.
      * @param tierId An owner-defined tier identifier (e.g. 1 = Bronze, 2 = Silver, 3 = Gold).
      * @param expiry Unix timestamp after which the tier is no longer active.
+     * @param representative Address that receives the same VIP tier badge via onBalanceOf.
      */
     struct CommunityTierGrant {
         uint256 tierId;
         uint256 expiry;
+        address representative;
     }
 
-    /// @notice communityId (= creator badge ID) => active community tier grant.
+    /// @notice communityId (= manager badge ID) => active community tier grant.
     mapping(uint256 => CommunityTierGrant) public communityTiers;
 
     // -------------------------------------------------------------------------
@@ -107,6 +113,12 @@ contract SocietyVipManager is
     error CannotDowngradeTier();
     /// @notice Error thrown when the requested lock duration exceeds the maximum allowed.
     error LockDurationTooLong();
+    /// @notice Error thrown when changeRepresentative is called on a community with no active tier grant.
+    error NoCommunityTierGrant();
+    /// @notice Error thrown when the chosen representative already has an active staking lock.
+    error RepresentativeAlreadyLocked();
+    /// @notice Error thrown when a provided badge ID does not exist on the badges contract.
+    error InvalidBadgeId();
 
     // -------------------------------------------------------------------------
     // Events
@@ -117,9 +129,11 @@ contract SocietyVipManager is
     event TierUpgraded(address indexed user, uint256 newTierId, uint256 newAmount, uint256 unlockTime);
     event AmountsUpdated(uint256 bronze, uint256 silver, uint256 gold);
     /// @notice Emitted when a community tier grant is created or overwritten.
-    event CommunityTierGranted(uint256 indexed communityId, uint256 tierId, uint256 expiry);
+    event CommunityTierGranted(uint256 indexed communityId, uint256 tierId, uint256 expiry, address indexed representative);
     /// @notice Emitted when a community tier grant is revoked before expiry.
     event CommunityTierRevoked(uint256 indexed communityId);
+    /// @notice Emitted when the representative of a community tier grant is changed.
+    event RepresentativeChanged(uint256 indexed communityId, address indexed oldRepresentative, address indexed newRepresentative);
 
     // -------------------------------------------------------------------------
     // Constructor / Initializer
@@ -132,6 +146,7 @@ contract SocietyVipManager is
 
     /**
      * @notice Initializes the VIP Manager.
+     * @param _badges Address of the SocietyProtocolBadges contract.
      * @param _stakingToken Address of the ERC20 token to use for staking.
      * @param _bronzeBadgeId ID of the pre-created Bronze VIP badge.
      * @param _silverBadgeId ID of the pre-created Silver VIP badge.
@@ -141,6 +156,7 @@ contract SocietyVipManager is
      * @param _goldAmount Minimum tokens required for Gold tier (must be >= silver).
      */
     function initialize(
+        address _badges,
         address _stakingToken,
         uint256 _bronzeBadgeId,
         uint256 _silverBadgeId,
@@ -149,12 +165,18 @@ contract SocietyVipManager is
         uint256 _silverAmount,
         uint256 _goldAmount
     ) public initializer {
-        if (_stakingToken == address(0)) revert InvalidAddress();
+        if (_badges == address(0) || _stakingToken == address(0)) revert InvalidAddress();
         if (_bronzeAmount == 0 || _silverAmount < _bronzeAmount || _goldAmount < _silverAmount)
             revert InvalidTierAmounts();
 
+        SocietyProtocolBadges b = SocietyProtocolBadges(_badges);
+        if (!b.badgeExists(_bronzeBadgeId)) revert InvalidBadgeId();
+        if (!b.badgeExists(_silverBadgeId)) revert InvalidBadgeId();
+        if (!b.badgeExists(_goldBadgeId))   revert InvalidBadgeId();
+
         __Ownable_init(msg.sender);
         __UUPSUpgradeable_init();
+        badges = b;
         stakingToken = IERC20(_stakingToken);
 
         bronzeBadgeId = _bronzeBadgeId;
@@ -218,6 +240,9 @@ contract SocietyVipManager is
                 revert ExpiredLockMustBeUnlockedFirst();
             }
         }
+        if (userLock.tierId != 0 && block.timestamp < userLock.unlockTime) {
+            revert LockAlreadyActive();
+        }
 
         userLock.tierId = tierId;
         userLock.amount = amount;
@@ -273,24 +298,34 @@ contract SocietyVipManager is
     /**
      * @notice Grants a community tier to a community for a fixed duration.
      * @dev Only the contract owner can call this. Overwrites any existing grant.
-     *      Community tier ownership is not expressed as an ERC1155 badge balance — use
-     *      getCommunityTier(communityId) to read the tier and verify creator-badge ownership
-     *      separately via badges.balanceOf(account, communityId) > 0.
-     * @param communityId The community's identifier (= creator badge ID).
-     * @param tierId An identifier for the tier level (e.g. 1 = Bronze, 2 = Silver, 3 = Gold).
+     *      The representative receives the same VIP tier badge via onBalanceOf for the grant's duration.
+     *      If regranting with a different representative, the old representative's tier is cleared.
+     * @param communityId The community's identifier (= manager badge ID).
+     * @param tierId An identifier for the tier level (1 = Bronze, 2 = Silver, 3 = Gold).
      * @param duration Duration in seconds before the tier expires.
+     * @param representative Address that receives the VIP badge for the duration of the grant.
      */
     function grantCommunityTier(
         uint256 communityId,
         uint256 tierId,
-        uint256 duration
+        uint256 duration,
+        address representative
     ) external onlyOwner {
         if (tierId == 0 || tierId > 3) revert InvalidTier();
         if (duration == 0) revert LockDurationTooShort();
+        if (representative == address(0)) revert InvalidAddress();
+
+        CommunityTierGrant storage existingGrant = communityTiers[communityId];
+        address oldRepresentative = existingGrant.representative;
+        if (locks[representative].amount > 0) revert RepresentativeAlreadyLocked();
 
         uint256 expiry = block.timestamp + duration;
-        communityTiers[communityId] = CommunityTierGrant({ tierId: tierId, expiry: expiry });
-        emit CommunityTierGranted(communityId, tierId, expiry);
+        if (oldRepresentative != representative && locks[oldRepresentative].amount == 0) {
+            delete locks[oldRepresentative];
+        }
+        communityTiers[communityId] = CommunityTierGrant({ tierId: tierId, expiry: expiry, representative: representative });
+        locks[representative] = LockInfo({ tierId: tierId, amount: 0, unlockTime: expiry });
+        emit CommunityTierGranted(communityId, tierId, expiry, representative);
     }
 
     /**
@@ -300,8 +335,30 @@ contract SocietyVipManager is
      */
     function revokeCommunityTier(uint256 communityId) external onlyOwner {
         if (communityTiers[communityId].expiry == 0) return;
+        address rep = communityTiers[communityId].representative;
         delete communityTiers[communityId];
+        if (locks[rep].amount == 0) delete locks[rep];
         emit CommunityTierRevoked(communityId);
+    }
+
+    /**
+     * @notice Transfers the community VIP grant to a new representative, preserving the original expiry.
+     * @dev Removes the lock from the old representative and assigns it to the new one.
+     * @param communityId The community whose representative is being changed.
+     * @param newRepresentative The address that will receive the VIP tier lock.
+     */
+    function changeRepresentative(uint256 communityId, address newRepresentative) external onlyOwner {
+        if (newRepresentative == address(0)) revert InvalidAddress();
+        CommunityTierGrant storage grant = communityTiers[communityId];
+        if (grant.expiry == 0 || block.timestamp >= grant.expiry) revert NoCommunityTierGrant();
+
+        if (locks[newRepresentative].amount > 0) revert RepresentativeAlreadyLocked();
+
+        address oldRep = grant.representative;
+        if (locks[oldRep].amount == 0) delete locks[oldRep];
+        grant.representative = newRepresentative;
+        locks[newRepresentative] = LockInfo({ tierId: grant.tierId, amount: 0, unlockTime: grant.expiry });
+        emit RepresentativeChanged(communityId, oldRep, newRepresentative);
     }
 
     /**
@@ -340,14 +397,13 @@ contract SocietyVipManager is
 
     /**
      * @notice Returns 1 if the account holds the personal VIP badge based on their staked amount.
-     * @dev Community tier badges are not routed through this hook — use getCommunityTier instead.
+     * @dev Community-tier representatives are also reflected through the same lock mapping.
+     *      Tier visibility is exclusive: Bronze shows only Bronze, Silver only Silver, Gold only Gold.
      */
     function onBalanceOf(address account, uint256 id) external view returns (uint256) {
         LockInfo storage userLock = locks[account];
         if (block.timestamp >= userLock.unlockTime || userLock.tierId == 0) return 0;
 
-        // Tier is snapshotted at lock time — threshold changes don't demote existing locks.
-        // Higher tiers include lower-tier badges (Gold holder also qualifies as Silver and Bronze).
         if (id == goldBadgeId)   return userLock.tierId == 3 ? 1 : 0;
         if (id == silverBadgeId) return userLock.tierId == 2 ? 1 : 0;
         if (id == bronzeBadgeId) return userLock.tierId == 1 ? 1 : 0;

@@ -673,6 +673,11 @@ contract SocietyProtocolBadges is
         return badges[id].isCommunityBadge;
     }
 
+    /// @notice Returns true if a badge with the given ID has been created.
+    function badgeExists(uint256 id) external view returns (bool) {
+        return _badgeExists(id);
+    }
+
     /**
      * @notice Overridden internal update hook to enforce all badge permissions.
      * @dev This is the central security mechanism. It checks:
