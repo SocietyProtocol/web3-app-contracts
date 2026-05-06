@@ -186,6 +186,35 @@ describe("CommunityRegistry", function () {
             ).to.not.be.reverted;
         });
 
+        it("manager can modify badge name and URI via registry", async function () {
+            await expect(
+                registry.connect(alice).modifyBadge(COMMUNITY_ID, MEMBER_BADGE_ID, "Members v2", "ipfs://members-v2")
+            ).to.not.be.reverted;
+            const badge = await badges.badges(MEMBER_BADGE_ID);
+            expect(badge.name).to.equal("Members v2");
+            expect(badge.metadataURI).to.equal("ipfs://members-v2");
+            expect(badge.isOfficial).to.be.false;
+        });
+
+        it("modifyBadge via registry cannot set isOfficial", async function () {
+            await registry.connect(alice).modifyBadge(COMMUNITY_ID, MEMBER_BADGE_ID, "Members v2", "ipfs://members-v2");
+            expect((await badges.badges(MEMBER_BADGE_ID)).isOfficial).to.be.false;
+        });
+
+        it("non-manager cannot modifyBadge via registry", async function () {
+            await expect(
+                registry.connect(bob).modifyBadge(COMMUNITY_ID, MEMBER_BADGE_ID, "Hack", "ipfs://hack")
+            ).to.be.revertedWithCustomError(registry, "Unauthorized");
+        });
+
+        it("manager cannot modifyBadge for a badge from a different community", async function () {
+            await createCommunity(bob, "Beta");
+            const otherCommunityId = COMMUNITY_ID + 3n;
+            await expect(
+                registry.connect(alice).modifyBadge(COMMUNITY_ID, otherCommunityId, "Hack", "ipfs://hack")
+            ).to.be.revertedWithCustomError(registry, "BadgeNotInCommunity");
+        });
+
         it("manager cannot update badge URI directly on badge contract", async function () {
             await expect(
                 badges.connect(alice).setURI(COMMUNITY_ID, "ipfs://hack")

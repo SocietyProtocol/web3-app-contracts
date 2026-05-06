@@ -337,6 +337,24 @@ contract CommunityRegistry is Initializable, OwnableUpgradeable, UUPSUpgradeable
         badges.setBadgeHook(badgeId, hook);
     }
 
+    /**
+     * @notice Modifies a community badge's name and metadata URI.
+     * @dev isOfficial is always forced to false — community badges cannot be promoted to official.
+     * @param communityId The community whose badge is being updated (= Manager badge ID).
+     * @param badgeId The badge to update. Must belong to this community.
+     * @param name New human-readable name.
+     * @param metadataURI New metadata URI.
+     */
+    function modifyBadge(
+        uint256 communityId,
+        uint256 badgeId,
+        string calldata name,
+        string calldata metadataURI
+    ) external onlyManager(communityId) {
+        if (!_isCommunityBadge(communityId, badgeId)) revert BadgeNotInCommunity();
+        badges.modifyBadge(badgeId, name, false, metadataURI);
+    }
+
     /// @dev Returns true if badgeId was created as part of communityId.
     function _isCommunityBadge(uint256 communityId, uint256 badgeId) internal view returns (bool) {
         if (badgeId == communityId) return true;
