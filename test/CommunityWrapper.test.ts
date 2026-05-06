@@ -15,6 +15,7 @@ describe("CommunityWrapper and Upgradeable Factory", function () {
     let user1: any;
 
     const PERM_EVERYONE = 2n;
+    const PERM_SELF = 1n;
     const STARTING_BADGE_ID = 10n;
     const ID1 = STARTING_BADGE_ID + 1n;
     const ID2 = STARTING_BADGE_ID + 2n;
@@ -79,7 +80,7 @@ describe("CommunityWrapper and Upgradeable Factory", function () {
         });
 
         it("Admin rights follow the badge — new holder can manage, old holder cannot", async function () {
-            await badges.createBadge("Creator Badge", true, false, ethers.ZeroAddress, "ipfs://c", [PERM_EVERYONE], [PERM_EVERYONE], [], [owner.address]);
+            await badges.createBadge("Creator Badge", true, false, ethers.ZeroAddress, "ipfs://c", [PERM_EVERYONE], [PERM_SELF], [], [owner.address]);
             await badges.mint(creator.address, ID1, 1, "0x");
 
             const tx = await factory.connect(creator).createWrapper("TC", "TC", [], ID1);
