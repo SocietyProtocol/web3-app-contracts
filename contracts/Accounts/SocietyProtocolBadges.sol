@@ -191,6 +191,8 @@ contract SocietyProtocolBadges is
     error InvalidSignature();
     /// @notice A user attempted to invite themselves.
     error SelfInvitation();
+    /// @notice A circular invitation was detected (invitee has already invited the inviter).
+    error CircularInvitation();
     /// @notice The invite signature has passed its expiry timestamp.
     error SignatureExpired();
     /// @notice This nonce has already been used by the inviter.
@@ -617,6 +619,7 @@ contract SocietyProtocolBadges is
         bytes calldata signature
     ) external {
         if (inviter == msg.sender) revert SelfInvitation();
+        if (hasInvited[msg.sender][inviter]) revert CircularInvitation();
         if (block.timestamp > expiry) revert SignatureExpired();
         if (usedNonces[inviter][nonce]) revert NonceAlreadyUsed();
         if (hasInvited[inviter][msg.sender]) revert AlreadyInvited();

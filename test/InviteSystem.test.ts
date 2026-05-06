@@ -156,4 +156,18 @@ describe("SocietyProtocolBadges - Invite System", function () {
             badges.connect(inviter).acceptInvite(inviter.address, nonce, expiry, signature)
         ).to.be.revertedWithCustomError(badges, "SelfInvitation");
     });
+
+    // ─── Circular invite ──────────────────────────────────────────────────────
+
+    it("reverts with CircularInvitation when invitee has already invited the inviter", async function () {
+        // invitee invites inviter first
+        const inv1 = await makeInvite(invitee, inviter.address, 1n);
+        await badges.connect(inviter).acceptInvite(invitee.address, inv1.nonce, inv1.expiry, inv1.signature);
+
+        // inviter now tries to invite invitee back — should be blocked
+        const inv2 = await makeInvite(inviter, invitee.address, 2n);
+        await expect(
+            badges.connect(invitee).acceptInvite(inviter.address, inv2.nonce, inv2.expiry, inv2.signature)
+        ).to.be.revertedWithCustomError(badges, "CircularInvitation");
+    });
 });
