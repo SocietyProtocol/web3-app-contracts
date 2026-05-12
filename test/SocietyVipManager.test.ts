@@ -627,6 +627,48 @@ describe("Society VIP Manager", function () {
             ).to.be.revertedWithCustomError(vipManager, "LockAlreadyActive");
         });
 
+        it("expired representative can be assigned to a new community without explicit revoke", async function () {
+            const [, , user2] = await ethers.getSigners();
+            const bronzeId = await vipManager.bronzeBadgeId();
+
+            // Create a second community badge
+            const tx2 = await badges.createBadge("Community 2", true, false, ethers.ZeroAddress, "", [2n], [1n], [], [owner.address]);
+            const receipt2 = await tx2.wait();
+            const event2 = receipt2?.logs.find((l: any) => l.fragment?.name === 'BadgeCreated') as any;
+            const community2Id = event2?.args[0];
+
+            // Grant community A to creator, then let it expire
+            await vipManager.grantCommunityTier(communityId, BRONZE, ONE_MONTH, creator.address);
+            expect(await badges.balanceOf(creator.address, bronzeId)).to.equal(1);
+            await time.increase(ONE_MONTH + 1);
+            expect(await badges.balanceOf(creator.address, bronzeId)).to.equal(0);
+
+            // Assign same address to community B without calling revoke — must succeed
+            await expect(
+                vipManager.grantCommunityTier(community2Id, BRONZE, ONE_YEAR, creator.address)
+            ).to.not.be.reverted;
+
+            // Representative is now active for community B
+            expect(await badges.balanceOf(creator.address, bronzeId)).to.equal(1);
+            expect(await vipManager.representativeCommunity(creator.address)).to.equal(community2Id);
+        });
+
+        it("active representative cannot be reused across two communities simultaneously", async function () {
+            const [, , user2] = await ethers.getSigners();
+
+            const tx2 = await badges.createBadge("Community 2", true, false, ethers.ZeroAddress, "", [2n], [1n], [], [owner.address]);
+            const receipt2 = await tx2.wait();
+            const event2 = receipt2?.logs.find((l: any) => l.fragment?.name === 'BadgeCreated') as any;
+            const community2Id = event2?.args[0];
+
+            await vipManager.grantCommunityTier(communityId, BRONZE, ONE_YEAR, creator.address);
+
+            // Still active — assigning to a second community must revert
+            await expect(
+                vipManager.grantCommunityTier(community2Id, BRONZE, ONE_YEAR, creator.address)
+            ).to.be.revertedWithCustomError(vipManager, "AlreadyARepresentative");
+        });
+
         it("revoke does not delete rep lock if they staked after grant expired", async function () {
             const SHORT = ONE_MONTH;
             // 1. Grant with short duration

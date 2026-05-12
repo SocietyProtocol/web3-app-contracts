@@ -89,6 +89,9 @@ contract SocietyVipManager is
     /// @notice communityId (= manager badge ID) => active community tier grant.
     mapping(uint256 => CommunityTierGrant) public communityTiers;
 
+    /// @notice Tracks which communityId a given address is currently representing (0 = none).
+    mapping(address => uint256) public representativeCommunity;
+
     // -------------------------------------------------------------------------
     // Errors
     // -------------------------------------------------------------------------
@@ -119,6 +122,8 @@ contract SocietyVipManager is
     error RepresentativeAlreadyLocked();
     /// @notice Error thrown when a provided badge ID does not exist on the badges contract.
     error InvalidBadgeId();
+    /// @notice Error thrown when an address is already an active representative for another community.
+    error AlreadyARepresentative();
 
     // -------------------------------------------------------------------------
     // Events
@@ -318,13 +323,20 @@ contract SocietyVipManager is
         CommunityTierGrant storage existingGrant = communityTiers[communityId];
         address oldRepresentative = existingGrant.representative;
         if (locks[representative].amount > 0) revert RepresentativeAlreadyLocked();
+        uint256 existingCommunity = representativeCommunity[representative];
+        if (existingCommunity != 0 && existingCommunity != communityId) {
+            if (block.timestamp < communityTiers[existingCommunity].expiry) revert AlreadyARepresentative();
+            delete representativeCommunity[representative];
+        }
 
         uint256 expiry = block.timestamp + duration;
-        if (oldRepresentative != representative && locks[oldRepresentative].amount == 0) {
-            delete locks[oldRepresentative];
+        if (oldRepresentative != address(0) && oldRepresentative != representative) {
+            if (locks[oldRepresentative].amount == 0) delete locks[oldRepresentative];
+            delete representativeCommunity[oldRepresentative];
         }
         communityTiers[communityId] = CommunityTierGrant({ tierId: tierId, expiry: expiry, representative: representative });
         locks[representative] = LockInfo({ tierId: tierId, amount: 0, unlockTime: expiry });
+        representativeCommunity[representative] = communityId;
         emit CommunityTierGranted(communityId, tierId, expiry, representative);
     }
 
@@ -337,6 +349,7 @@ contract SocietyVipManager is
         if (communityTiers[communityId].expiry == 0) return;
         address rep = communityTiers[communityId].representative;
         delete communityTiers[communityId];
+        delete representativeCommunity[rep];
         if (locks[rep].amount == 0) delete locks[rep];
         emit CommunityTierRevoked(communityId);
     }
@@ -353,11 +366,18 @@ contract SocietyVipManager is
         if (grant.expiry == 0 || block.timestamp >= grant.expiry) revert NoCommunityTierGrant();
 
         if (locks[newRepresentative].amount > 0) revert RepresentativeAlreadyLocked();
+        uint256 existingCommunity = representativeCommunity[newRepresentative];
+        if (existingCommunity != 0) {
+            if (block.timestamp < communityTiers[existingCommunity].expiry) revert AlreadyARepresentative();
+            delete representativeCommunity[newRepresentative];
+        }
 
         address oldRep = grant.representative;
         if (locks[oldRep].amount == 0) delete locks[oldRep];
+        delete representativeCommunity[oldRep];
         grant.representative = newRepresentative;
         locks[newRepresentative] = LockInfo({ tierId: grant.tierId, amount: 0, unlockTime: grant.expiry });
+        representativeCommunity[newRepresentative] = communityId;
         emit RepresentativeChanged(communityId, oldRep, newRepresentative);
     }
 
