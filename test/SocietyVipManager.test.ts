@@ -628,7 +628,7 @@ describe("Society VIP Manager", function () {
         });
 
         it("expired representative can be assigned to a new community without explicit revoke", async function () {
-            const [, , user2] = await ethers.getSigners();
+            const [, ,] = await ethers.getSigners();
             const bronzeId = await vipManager.bronzeBadgeId();
 
             // Create a second community badge
@@ -654,7 +654,7 @@ describe("Society VIP Manager", function () {
         });
 
         it("active representative cannot be reused across two communities simultaneously", async function () {
-            const [, , user2] = await ethers.getSigners();
+            const [, ,] = await ethers.getSigners();
 
             const tx2 = await badges.createBadge("Community 2", true, false, ethers.ZeroAddress, "", [2n], [1n], [], [owner.address]);
             const receipt2 = await tx2.wait();
@@ -667,6 +667,58 @@ describe("Society VIP Manager", function () {
             await expect(
                 vipManager.grantCommunityTier(community2Id, BRONZE, ONE_YEAR, creator.address)
             ).to.be.revertedWithCustomError(vipManager, "AlreadyARepresentative");
+        });
+
+        it("revoking an expired community does not wipe rep lock that was reused by another community", async function () {
+            const [, ,] = await ethers.getSigners();
+            const bronzeId = await vipManager.bronzeBadgeId();
+
+            const tx2 = await badges.createBadge("Community 2", true, false, ethers.ZeroAddress, "", [2n], [1n], [], [owner.address]);
+            const receipt2 = await tx2.wait();
+            const event2 = receipt2?.logs.find((l: any) => l.fragment?.name === 'BadgeCreated') as any;
+            const community2Id = event2?.args[0];
+
+            // 1. Grant community A to creator, let it expire
+            await vipManager.grantCommunityTier(communityId, BRONZE, ONE_MONTH, creator.address);
+            await time.increase(ONE_MONTH + 1);
+
+            // 2. Reuse same rep for community B (expired path clears stale A entry)
+            await vipManager.grantCommunityTier(community2Id, BRONZE, ONE_YEAR, creator.address);
+            expect(await badges.balanceOf(creator.address, bronzeId)).to.equal(1);
+            expect(await vipManager.representativeCommunity(creator.address)).to.equal(community2Id);
+
+            // 3. Revoke the now-expired community A — must NOT touch community B's lock
+            await vipManager.revokeCommunityTier(communityId);
+
+            // Creator is still an active rep for community B
+            expect(await badges.balanceOf(creator.address, bronzeId)).to.equal(1);
+            expect(await vipManager.representativeCommunity(creator.address)).to.equal(community2Id);
+            const lock = await vipManager.locks(creator.address);
+            expect(lock.tierId).to.equal(BRONZE);
+        });
+
+        it("re-granting an expired community to a new rep does not wipe rep lock reused by another community", async function () {
+            const [, , , , user3] = await ethers.getSigners();
+            const bronzeId = await vipManager.bronzeBadgeId();
+
+            const tx2 = await badges.createBadge("Community 2", true, false, ethers.ZeroAddress, "", [2n], [1n], [], [owner.address]);
+            const receipt2 = await tx2.wait();
+            const event2 = receipt2?.logs.find((l: any) => l.fragment?.name === 'BadgeCreated') as any;
+            const community2Id = event2?.args[0];
+
+            // 1. Grant A to creator, expire, reuse creator for B
+            await vipManager.grantCommunityTier(communityId, BRONZE, ONE_MONTH, creator.address);
+            await time.increase(ONE_MONTH + 1);
+            await vipManager.grantCommunityTier(community2Id, BRONZE, ONE_YEAR, creator.address);
+            expect(await badges.balanceOf(creator.address, bronzeId)).to.equal(1);
+
+            // 2. Re-grant A (now expired) to a different rep (user3)
+            //    The old rep (creator) is stored in communityTiers[A] but now represents B
+            await vipManager.grantCommunityTier(communityId, BRONZE, ONE_YEAR, user3.address);
+
+            // creator's B lock must still be intact
+            expect(await badges.balanceOf(creator.address, bronzeId)).to.equal(1);
+            expect(await vipManager.representativeCommunity(creator.address)).to.equal(community2Id);
         });
 
         it("revoke does not delete rep lock if they staked after grant expired", async function () {

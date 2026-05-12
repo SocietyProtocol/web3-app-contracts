@@ -331,8 +331,10 @@ contract SocietyVipManager is
 
         uint256 expiry = block.timestamp + duration;
         if (oldRepresentative != address(0) && oldRepresentative != representative) {
-            if (locks[oldRepresentative].amount == 0) delete locks[oldRepresentative];
-            delete representativeCommunity[oldRepresentative];
+            if (representativeCommunity[oldRepresentative] == communityId) {
+                delete representativeCommunity[oldRepresentative];
+                if (locks[oldRepresentative].amount == 0) delete locks[oldRepresentative];
+            }
         }
         communityTiers[communityId] = CommunityTierGrant({ tierId: tierId, expiry: expiry, representative: representative });
         locks[representative] = LockInfo({ tierId: tierId, amount: 0, unlockTime: expiry });
@@ -349,8 +351,10 @@ contract SocietyVipManager is
         if (communityTiers[communityId].expiry == 0) return;
         address rep = communityTiers[communityId].representative;
         delete communityTiers[communityId];
-        delete representativeCommunity[rep];
-        if (locks[rep].amount == 0) delete locks[rep];
+        if (representativeCommunity[rep] == communityId) {
+            delete representativeCommunity[rep];
+            if (locks[rep].amount == 0) delete locks[rep];
+        }
         emit CommunityTierRevoked(communityId);
     }
 
