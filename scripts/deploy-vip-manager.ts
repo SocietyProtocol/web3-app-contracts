@@ -110,6 +110,7 @@ async function main() {
     const contract = await upgrades.deployProxy(
         factory,
         [
+            BADGES_CONTRACT_ADDRESS,
             STAKING_TOKEN_ADDRESS,
             bronzeId,
             silverId,

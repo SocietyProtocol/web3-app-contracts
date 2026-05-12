@@ -39,12 +39,14 @@ async function main() {
 
     // 4. Create an initial CommunityWrapper
     console.log("Creating initial CommunityWrapper...");
-    // Let's assume we want a wrapper for some IDs, say 11 and 12 (STARTING_BADGE_ID is 10)
-    const initialBadgeIds = [11, 12];
+    // Pass 0 as managerBadgeId to create an unmanaged (immutable) wrapper.
+    // Replace with a real badge ID if the wrapper's badge list needs to be updatable.
+    const initialBadgeIds: bigint[] = [];
     const tx = await (factory as any).createWrapper(
         "Initial Community",
         "ICOM",
-        initialBadgeIds
+        initialBadgeIds,
+        0n
     );
     const receipt = await tx.wait();
 
