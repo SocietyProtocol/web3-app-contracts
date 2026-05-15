@@ -7,6 +7,7 @@ contract MockHook is ISocietyBadgeHook {
     bool public allowMint;
     bool public allowTransfer;
     bool public allowBurn;
+    uint256 public mockBalance;
 
     constructor(bool _mint, bool _transfer, bool _burn) {
         allowMint = _mint;
@@ -18,6 +19,10 @@ contract MockHook is ISocietyBadgeHook {
         allowMint = _mint;
         allowTransfer = _transfer;
         allowBurn = _burn;
+    }
+
+    function setMockBalance(uint256 _balance) external {
+        mockBalance = _balance;
     }
 
     function onCheckMint(
@@ -48,7 +53,7 @@ contract MockHook is ISocietyBadgeHook {
         return allowBurn;
     }
 
-    function onBalanceOf(address, uint256) external pure returns (uint256) {
-        return 0;
+    function onBalanceOf(address, uint256) external view returns (uint256) {
+        return mockBalance;
     }
 }

@@ -54,7 +54,7 @@ contract CommunityWrapperFactory is
         __UUPSUpgradeable_init();
 
         require(_badgeContract != address(0), "Invalid badge contract");
-        require(_wrapperImplementation != address(0), "Invalid implementation");
+        require(_wrapperImplementation.code.length > 0, "Implementation must be a contract");
 
         badgeContract = _badgeContract;
         wrapperImplementation = _wrapperImplementation;
@@ -68,7 +68,7 @@ contract CommunityWrapperFactory is
     function setWrapperImplementation(
         address _newImplementation
     ) external onlyOwner {
-        require(_newImplementation != address(0), "Invalid implementation");
+        require(_newImplementation.code.length > 0, "Implementation must be a contract");
         wrapperImplementation = _newImplementation;
         emit ImplementationUpdated(_newImplementation);
     }
@@ -78,12 +78,14 @@ contract CommunityWrapperFactory is
      * @param name The name for the new ERC20 wrapper.
      * @param symbol The symbol for the new ERC20 wrapper.
      * @param initialBadgeIds The set of badge IDs that will define membership for this community.
+     * @param managerBadgeId The badge ID whose holder will manage the wrapper after deployment.
      * @return clone The address of the newly created wrapper proxy.
      */
     function createWrapper(
         string calldata name,
         string calldata symbol,
-        uint256[] calldata initialBadgeIds
+        uint256[] calldata initialBadgeIds,
+        uint256 managerBadgeId
     ) external returns (address) {
         address clone = Clones.clone(wrapperImplementation);
 
@@ -92,7 +94,7 @@ contract CommunityWrapperFactory is
             symbol,
             badgeContract,
             initialBadgeIds,
-            msg.sender
+            managerBadgeId
         );
 
         emit WrapperDeployed(

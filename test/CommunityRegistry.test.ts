@@ -14,19 +14,24 @@ describe("CommunityRegistry", function () {
     let registry: CommunityRegistry;
 
     let owner: any;
-    let alice: any; // community creator
+    let alice: any; // community manager
     let bob: any;   // member / other user
     let carol: any;
 
     const STARTING_BADGE_ID = 10n;
     // createCommunity() creates badges sequentially:
-    //   communityId (= creatorBadgeId) = 11, memberBadgeId = 12
-    const COMMUNITY_ID   = STARTING_BADGE_ID + 1n; // 11 — also the Creator badge ID
-    const MEMBER_BADGE_ID = STARTING_BADGE_ID + 2n; // 12
+    //   communityId (= managerBadgeId) = 11, assistantBadgeId = 12, memberBadgeId = 13
+    const COMMUNITY_ID       = STARTING_BADGE_ID + 1n; // 11 — also the Manager badge ID
+    const ASSISTANT_BADGE_ID = STARTING_BADGE_ID + 2n; // 12
+    const MEMBER_BADGE_ID    = STARTING_BADGE_ID + 3n; // 13
 
     const COMMUNITY_MANAGER_ROLE = ethers.keccak256(
         ethers.toUtf8Bytes("COMMUNITY_MANAGER_ROLE")
     );
+
+    async function createCommunity(signer: any, name = "Alpha", desc = "Desc") {
+        return registry.connect(signer).createCommunity(name, desc, "uri:m", "uri:a", "uri:mb");
+    }
 
     beforeEach(async function () {
         [owner, alice, bob, carol] = await ethers.getSigners();
@@ -77,90 +82,170 @@ describe("CommunityRegistry", function () {
     // ─── createCommunity ───────────────────────────────────────────────────────
 
     describe("createCommunity()", function () {
-        it("should return communityId = creatorBadgeId (= 11)", async function () {
-            const tx = await registry.connect(alice).createCommunity("Alpha", "Desc", "uri:c", "uri:m");
+        it("should return communityId = managerBadgeId (= 11)", async function () {
+            const tx = await createCommunity(alice);
             const receipt = await tx.wait();
             const event = receipt?.logs.find((log: any) => log.fragment?.name === "CommunityCreated") as any;
             expect(event.args[0]).to.equal(COMMUNITY_ID);
         });
 
-        it("should emit CommunityCreated with (communityId, creator, memberBadgeId)", async function () {
-            await expect(
-                registry.connect(alice).createCommunity("Alpha", "Desc", "uri:c", "uri:m")
-            )
+        it("should emit CommunityCreated with (communityId, creator, assistantBadgeId, memberBadgeId)", async function () {
+            await expect(createCommunity(alice))
                 .to.emit(registry, "CommunityCreated")
-                .withArgs(COMMUNITY_ID, alice.address, MEMBER_BADGE_ID);
+                .withArgs(COMMUNITY_ID, alice.address, ASSISTANT_BADGE_ID, MEMBER_BADGE_ID);
         });
 
-        it("should mint creator badge to the caller", async function () {
-            await registry.connect(alice).createCommunity("Alpha", "Desc", "uri:c", "uri:m");
+        it("should mint manager badge to the caller", async function () {
+            await createCommunity(alice);
             expect(await badges.balanceOf(alice.address, COMMUNITY_ID)).to.equal(1);
         });
 
-        it("should mint one member badge to the caller (creator is also a member)", async function () {
-            await registry.connect(alice).createCommunity("Alpha", "Desc", "uri:c", "uri:m");
+        it("should mint one member badge to the caller (manager is also a member)", async function () {
+            await createCommunity(alice);
             expect(await badges.balanceOf(alice.address, MEMBER_BADGE_ID)).to.equal(1);
         });
 
+        it("should NOT mint assistant badge to the caller automatically", async function () {
+            await createCommunity(alice);
+            expect(await badges.balanceOf(alice.address, ASSISTANT_BADGE_ID)).to.equal(0);
+        });
+
         it("should store community data correctly", async function () {
-            await registry.connect(alice).createCommunity("Alpha", "My community", "uri:c", "uri:m");
+            await createCommunity(alice, "Alpha", "My community");
             const community = await registry.getCommunityDetails(COMMUNITY_ID);
             expect(community.name).to.equal("Alpha");
             expect(community.description).to.equal("My community");
+            expect(community.assistantBadgeId).to.equal(ASSISTANT_BADGE_ID);
             expect(community.memberBadgeId).to.equal(MEMBER_BADGE_ID);
             expect(community.wrapper).to.equal(ethers.ZeroAddress);
+            expect(community.createdAt).to.be.gt(0n);
         });
 
         it("should increment communityCount for each community", async function () {
-            await registry.connect(alice).createCommunity("A", "A", "u", "u");
-            await registry.connect(bob).createCommunity("B", "B", "u", "u");
+            await createCommunity(alice, "A");
+            await createCommunity(bob, "B");
             expect(await registry.communityCount()).to.equal(2);
         });
 
-        it("second community gets communityId = 13 (badge IDs are sequential)", async function () {
-            await registry.connect(alice).createCommunity("A", "A", "u", "u");
-            // Second createCommunity: creator badge ID = 13, member badge ID = 14
-            await expect(
-                registry.connect(bob).createCommunity("B", "B", "u", "u")
-            )
+        it("second community gets communityId = 14 (3 badges created per community)", async function () {
+            await createCommunity(alice, "A");
+            // Second createCommunity: manager=14, assistant=15, member=16
+            await expect(createCommunity(bob, "B"))
                 .to.emit(registry, "CommunityCreated")
-                .withArgs(STARTING_BADGE_ID + 3n, bob.address, STARTING_BADGE_ID + 4n);
+                .withArgs(STARTING_BADGE_ID + 4n, bob.address, STARTING_BADGE_ID + 5n, STARTING_BADGE_ID + 6n);
         });
     });
 
-    // ─── Creator badge permissions ─────────────────────────────────────────────
+    // ─── Manager badge permissions ─────────────────────────────────────────────
 
-    describe("Creator badge — permissions", function () {
+    describe("Manager badge — permissions", function () {
         beforeEach(async function () {
-            await registry.connect(alice).createCommunity("Alpha", "Desc", "uri:c", "uri:m");
+            await createCommunity(alice);
         });
 
-        it("only the holder can transfer the creator badge (PERM_SELF)", async function () {
+        it("only the holder can transfer the manager badge (PERM_SELF)", async function () {
             await expect(
                 badges.connect(alice).safeTransferFrom(alice.address, bob.address, COMMUNITY_ID, 1, "0x")
             ).to.not.be.reverted;
             expect(await badges.balanceOf(bob.address, COMMUNITY_ID)).to.equal(1);
         });
 
-        it("a non-holder cannot transfer the creator badge", async function () {
+        it("a non-holder cannot transfer the manager badge", async function () {
             await expect(
                 badges.connect(bob).safeTransferFrom(alice.address, carol.address, COMMUNITY_ID, 1, "0x")
             ).to.be.revertedWithCustomError(badges, "TransferNotAuthorized");
         });
 
-        it("creator badge cannot be burned", async function () {
+        it("manager badge cannot be burned", async function () {
             await expect(
                 badges.connect(alice).burn(alice.address, COMMUNITY_ID, 1)
             ).to.be.revertedWithCustomError(badges, "BurnNotAuthorized");
         });
 
-        it("nobody can mint an additional creator badge", async function () {
+        it("nobody can mint an additional manager badge", async function () {
             await expect(
                 badges.connect(alice).mint(bob.address, COMMUNITY_ID, 1, "0x")
             ).to.be.revertedWithCustomError(badges, "MintNotAuthorized");
         });
 
-        it("creator badge transfers correctly and new holder gains creator powers", async function () {
+        it("manager can update manager badge URI via registry", async function () {
+            await expect(
+                registry.connect(alice).setBadgeURI(COMMUNITY_ID, COMMUNITY_ID, "ipfs://new-manager-uri")
+            ).to.not.be.reverted;
+        });
+
+        it("manager can update assistant badge URI via registry", async function () {
+            await expect(
+                registry.connect(alice).setBadgeURI(COMMUNITY_ID, ASSISTANT_BADGE_ID, "ipfs://new-assistant-uri")
+            ).to.not.be.reverted;
+        });
+
+        it("manager can update member badge URI via registry", async function () {
+            await expect(
+                registry.connect(alice).setBadgeURI(COMMUNITY_ID, MEMBER_BADGE_ID, "ipfs://new-member-uri")
+            ).to.not.be.reverted;
+        });
+
+        it("manager can modify badge name and URI via registry", async function () {
+            await expect(
+                registry.connect(alice).modifyBadge(COMMUNITY_ID, MEMBER_BADGE_ID, "Members v2", "ipfs://members-v2")
+            ).to.not.be.reverted;
+            const badge = await badges.badges(MEMBER_BADGE_ID);
+            expect(badge.name).to.equal("Members v2");
+            expect(badge.metadataURI).to.equal("ipfs://members-v2");
+            expect(badge.isOfficial).to.be.false;
+        });
+
+        it("modifyBadge via registry cannot set isOfficial", async function () {
+            await registry.connect(alice).modifyBadge(COMMUNITY_ID, MEMBER_BADGE_ID, "Members v2", "ipfs://members-v2");
+            expect((await badges.badges(MEMBER_BADGE_ID)).isOfficial).to.be.false;
+        });
+
+        it("non-manager cannot modifyBadge via registry", async function () {
+            await expect(
+                registry.connect(bob).modifyBadge(COMMUNITY_ID, MEMBER_BADGE_ID, "Hack", "ipfs://hack")
+            ).to.be.revertedWithCustomError(registry, "Unauthorized");
+        });
+
+        it("manager cannot modifyBadge for a badge from a different community", async function () {
+            await createCommunity(bob, "Beta");
+            const otherCommunityId = COMMUNITY_ID + 3n;
+            await expect(
+                registry.connect(alice).modifyBadge(COMMUNITY_ID, otherCommunityId, "Hack", "ipfs://hack")
+            ).to.be.revertedWithCustomError(registry, "BadgeNotInCommunity");
+        });
+
+        it("manager cannot update badge URI directly on badge contract", async function () {
+            await expect(
+                badges.connect(alice).setURI(COMMUNITY_ID, "ipfs://hack")
+            ).to.be.revertedWithCustomError(badges, "Unauthorized");
+        });
+
+        it("non-manager cannot update badge URI via registry", async function () {
+            await expect(
+                registry.connect(bob).setBadgeURI(COMMUNITY_ID, COMMUNITY_ID, "ipfs://hack")
+            ).to.be.revertedWithCustomError(registry, "Unauthorized");
+        });
+
+        it("manager cannot update a badge from a different community via registry", async function () {
+            await createCommunity(bob, "Beta");
+            const otherCommunityId = COMMUNITY_ID + 3n; // 3 badges per community
+            await expect(
+                registry.connect(alice).setBadgeURI(COMMUNITY_ID, otherCommunityId, "ipfs://hack")
+            ).to.be.revertedWithCustomError(registry, "BadgeNotInCommunity");
+        });
+
+        it("after badge transfer, new holder can update URI; old holder cannot", async function () {
+            await badges.connect(alice).safeTransferFrom(alice.address, bob.address, COMMUNITY_ID, 1, "0x");
+            await expect(
+                registry.connect(bob).setBadgeURI(COMMUNITY_ID, MEMBER_BADGE_ID, "ipfs://bob-update")
+            ).to.not.be.reverted;
+            await expect(
+                registry.connect(alice).setBadgeURI(COMMUNITY_ID, MEMBER_BADGE_ID, "ipfs://alice-update")
+            ).to.be.revertedWithCustomError(registry, "Unauthorized");
+        });
+
+        it("manager badge transfers correctly and new holder gains manager powers", async function () {
             await badges.connect(alice).safeTransferFrom(alice.address, bob.address, COMMUNITY_ID, 1, "0x");
 
             // Bob can now mint member badges
@@ -175,21 +260,89 @@ describe("CommunityRegistry", function () {
         });
     });
 
+    // ─── Assistant badge permissions ───────────────────────────────────────────
+
+    describe("Assistant badge — permissions", function () {
+        beforeEach(async function () {
+            await createCommunity(alice);
+        });
+
+        it("manager can mint assistant badge to another address", async function () {
+            await expect(
+                badges.connect(alice).mint(bob.address, ASSISTANT_BADGE_ID, 1, "0x")
+            ).to.not.be.reverted;
+            expect(await badges.balanceOf(bob.address, ASSISTANT_BADGE_ID)).to.equal(1);
+        });
+
+        it("non-manager cannot mint assistant badge", async function () {
+            await expect(
+                badges.connect(bob).mint(carol.address, ASSISTANT_BADGE_ID, 1, "0x")
+            ).to.be.revertedWithCustomError(badges, "MintNotAuthorized");
+        });
+
+        it("assistant badge is soulbound — transfer reverts", async function () {
+            await badges.connect(alice).mint(bob.address, ASSISTANT_BADGE_ID, 1, "0x");
+            await expect(
+                badges.connect(bob).safeTransferFrom(bob.address, carol.address, ASSISTANT_BADGE_ID, 1, "0x")
+            ).to.be.revertedWithCustomError(badges, "TransferNotAuthorized");
+        });
+
+        it("manager can burn assistant badge", async function () {
+            await badges.connect(alice).mint(bob.address, ASSISTANT_BADGE_ID, 1, "0x");
+            await expect(
+                badges.connect(alice).burn(bob.address, ASSISTANT_BADGE_ID, 1)
+            ).to.not.be.reverted;
+            expect(await badges.balanceOf(bob.address, ASSISTANT_BADGE_ID)).to.equal(0);
+        });
+
+        it("non-manager cannot burn assistant badge", async function () {
+            await badges.connect(alice).mint(bob.address, ASSISTANT_BADGE_ID, 1, "0x");
+            await expect(
+                badges.connect(carol).burn(bob.address, ASSISTANT_BADGE_ID, 1)
+            ).to.be.revertedWithCustomError(badges, "BurnNotAuthorized");
+        });
+
+        it("assistant badge holder can mint member badges", async function () {
+            await badges.connect(alice).mint(bob.address, ASSISTANT_BADGE_ID, 1, "0x");
+            await expect(
+                badges.connect(bob).mint(carol.address, MEMBER_BADGE_ID, 1, "0x")
+            ).to.not.be.reverted;
+            expect(await badges.balanceOf(carol.address, MEMBER_BADGE_ID)).to.equal(1);
+        });
+
+        it("assistant badge holder can burn member badges", async function () {
+            await badges.connect(alice).mint(bob.address, ASSISTANT_BADGE_ID, 1, "0x");
+            await badges.connect(alice).mint(carol.address, MEMBER_BADGE_ID, 1, "0x");
+            await expect(
+                badges.connect(bob).burn(carol.address, MEMBER_BADGE_ID, 1)
+            ).to.not.be.reverted;
+            expect(await badges.balanceOf(carol.address, MEMBER_BADGE_ID)).to.equal(0);
+        });
+
+        it("revoking assistant removes their ability to mint/burn member badges", async function () {
+            await badges.connect(alice).mint(bob.address, ASSISTANT_BADGE_ID, 1, "0x");
+            await badges.connect(alice).burn(bob.address, ASSISTANT_BADGE_ID, 1);
+            await expect(
+                badges.connect(bob).mint(carol.address, MEMBER_BADGE_ID, 1, "0x")
+            ).to.be.revertedWithCustomError(badges, "MintNotAuthorized");
+        });
+    });
+
     // ─── Member badge permissions ──────────────────────────────────────────────
 
     describe("Member badge — permissions", function () {
         beforeEach(async function () {
-            await registry.connect(alice).createCommunity("Alpha", "Desc", "uri:c", "uri:m");
+            await createCommunity(alice);
         });
 
-        it("creator badge holder can mint member badges to others", async function () {
+        it("manager badge holder can mint member badges to others", async function () {
             await expect(
                 badges.connect(alice).mint(bob.address, MEMBER_BADGE_ID, 1, "0x")
             ).to.not.be.reverted;
             expect(await badges.balanceOf(bob.address, MEMBER_BADGE_ID)).to.equal(1);
         });
 
-        it("non-creator cannot mint member badges", async function () {
+        it("non-manager/non-assistant cannot mint member badges", async function () {
             await expect(
                 badges.connect(bob).mint(carol.address, MEMBER_BADGE_ID, 1, "0x")
             ).to.be.revertedWithCustomError(badges, "MintNotAuthorized");
@@ -202,7 +355,7 @@ describe("CommunityRegistry", function () {
             ).to.be.revertedWithCustomError(badges, "TransferNotAuthorized");
         });
 
-        it("creator can burn a member's badge", async function () {
+        it("manager can burn a member's badge", async function () {
             await badges.connect(alice).mint(bob.address, MEMBER_BADGE_ID, 1, "0x");
             await expect(
                 badges.connect(alice).burn(bob.address, MEMBER_BADGE_ID, 1)
@@ -210,7 +363,7 @@ describe("CommunityRegistry", function () {
             expect(await badges.balanceOf(bob.address, MEMBER_BADGE_ID)).to.equal(0);
         });
 
-        it("non-creator cannot burn a member's badge", async function () {
+        it("non-manager/non-assistant cannot burn a member's badge", async function () {
             await badges.connect(alice).mint(bob.address, MEMBER_BADGE_ID, 1, "0x");
             await expect(
                 badges.connect(carol).burn(bob.address, MEMBER_BADGE_ID, 1)
@@ -222,10 +375,10 @@ describe("CommunityRegistry", function () {
 
     describe("deployCommunityWrapper()", function () {
         beforeEach(async function () {
-            await registry.connect(alice).createCommunity("Alpha", "Desc", "uri:c", "uri:m");
+            await createCommunity(alice);
         });
 
-        it("creator can deploy a wrapper and it is stored", async function () {
+        it("manager can deploy a wrapper and it is stored", async function () {
             const tx = await registry.connect(alice).deployCommunityWrapper(COMMUNITY_ID, "Alpha Token", "ALPHA");
             const receipt = await tx.wait();
             const event = receipt?.logs.find(
@@ -257,7 +410,7 @@ describe("CommunityRegistry", function () {
             ).to.be.revertedWithCustomError(registry, "WrapperAlreadyDeployed");
         });
 
-        it("non-creator cannot deploy a wrapper", async function () {
+        it("non-manager cannot deploy a wrapper", async function () {
             await expect(
                 registry.connect(bob).deployCommunityWrapper(COMMUNITY_ID, "Alpha Token", "ALPHA")
             ).to.be.revertedWithCustomError(registry, "Unauthorized");
@@ -270,11 +423,11 @@ describe("CommunityRegistry", function () {
         const PERM_EVERYONE = 2n;
 
         beforeEach(async function () {
-            await registry.connect(alice).createCommunity("Alpha", "Desc", "uri:c", "uri:m");
+            await createCommunity(alice);
         });
 
-        it("creator can create an additional badge", async function () {
-            const extraBadgeId = STARTING_BADGE_ID + 3n; // next after creator(11) and member(12)
+        it("manager can create an additional badge", async function () {
+            const extraBadgeId = STARTING_BADGE_ID + 4n; // next after manager(11), assistant(12), member(13)
             await expect(
                 registry.connect(alice).createCommunityBadge(
                     COMMUNITY_ID, "Contributor", "uri:contributor", [PERM_EVERYONE], [], []
@@ -284,16 +437,16 @@ describe("CommunityRegistry", function () {
                 .withArgs(COMMUNITY_ID, extraBadgeId);
         });
 
-        it("additional badge appears in getCommunityBadges at index 2+", async function () {
+        it("additional badge appears in getCommunityBadges at index 3+", async function () {
             await registry.connect(alice).createCommunityBadge(
                 COMMUNITY_ID, "Contributor", "uri:contributor", [PERM_EVERYONE], [], []
             );
             const ids = await registry.getCommunityBadges(COMMUNITY_ID);
-            expect(ids.length).to.equal(3); // creator, member, contributor
-            expect(ids[2]).to.equal(STARTING_BADGE_ID + 3n);
+            expect(ids.length).to.equal(4); // manager, assistant, member, contributor
+            expect(ids[3]).to.equal(STARTING_BADGE_ID + 4n);
         });
 
-        it("non-creator cannot create a badge", async function () {
+        it("non-manager cannot create a badge", async function () {
             await expect(
                 registry.connect(bob).createCommunityBadge(
                     COMMUNITY_ID, "Contributor", "uri:contributor", [PERM_EVERYONE], [], []
@@ -301,12 +454,12 @@ describe("CommunityRegistry", function () {
             ).to.be.revertedWithCustomError(registry, "Unauthorized");
         });
 
-        it("created badge has isCommunity = true", async function () {
+        it("created badge has isCommunityBadge = true", async function () {
             await registry.connect(alice).createCommunityBadge(
                 COMMUNITY_ID, "Contributor", "uri:contributor", [PERM_EVERYONE], [], []
             );
-            const info = await badges.badges(STARTING_BADGE_ID + 3n);
-            expect(info.isCommunity).to.equal(true);
+            const info = await badges.badges(STARTING_BADGE_ID + 4n);
+            expect(info.isCommunityBadge).to.equal(true);
         });
     });
 
@@ -314,10 +467,10 @@ describe("CommunityRegistry", function () {
 
     describe("updateCommunityDetails()", function () {
         beforeEach(async function () {
-            await registry.connect(alice).createCommunity("Alpha", "Old description", "uri:c", "uri:m");
+            await createCommunity(alice, "Alpha", "Old description");
         });
 
-        it("creator can update name and description", async function () {
+        it("manager can update name and description", async function () {
             await expect(
                 registry.connect(alice).updateCommunityDetails(COMMUNITY_ID, "Alpha v2", "New description")
             )
@@ -329,7 +482,7 @@ describe("CommunityRegistry", function () {
             expect(community.description).to.equal("New description");
         });
 
-        it("non-creator cannot update community details", async function () {
+        it("non-manager cannot update community details", async function () {
             await expect(
                 registry.connect(bob).updateCommunityDetails(COMMUNITY_ID, "Hijack", "Hijacked")
             ).to.be.revertedWithCustomError(registry, "Unauthorized");
@@ -340,7 +493,7 @@ describe("CommunityRegistry", function () {
 
     describe("View functions", function () {
         beforeEach(async function () {
-            await registry.connect(alice).createCommunity("Alpha", "Desc A", "uri:c", "uri:m");
+            await createCommunity(alice, "Alpha", "Desc A");
         });
 
         it("getCommunityDetails reverts for non-existent communityId", async function () {
@@ -349,11 +502,12 @@ describe("CommunityRegistry", function () {
             );
         });
 
-        it("getCommunityBadges returns [creatorBadgeId, memberBadgeId] by default", async function () {
+        it("getCommunityBadges returns [managerId, assistantId, memberId] by default", async function () {
             const ids = await registry.getCommunityBadges(COMMUNITY_ID);
-            expect(ids.length).to.equal(2);
-            expect(ids[0]).to.equal(COMMUNITY_ID);   // creator badge
-            expect(ids[1]).to.equal(MEMBER_BADGE_ID); // member badge
+            expect(ids.length).to.equal(3);
+            expect(ids[0]).to.equal(COMMUNITY_ID);       // manager badge
+            expect(ids[1]).to.equal(ASSISTANT_BADGE_ID); // assistant badge
+            expect(ids[2]).to.equal(MEMBER_BADGE_ID);    // member badge
         });
 
         it("getCommunityBadges reverts for non-existent communityId", async function () {
@@ -362,18 +516,18 @@ describe("CommunityRegistry", function () {
             );
         });
 
-        it("isCreator returns true for the current creator badge holder", async function () {
-            expect(await registry.isCreator(COMMUNITY_ID, alice.address)).to.equal(true);
-            expect(await registry.isCreator(COMMUNITY_ID, bob.address)).to.equal(false);
+        it("isManager returns true for the current manager badge holder", async function () {
+            expect(await registry.isManager(COMMUNITY_ID, alice.address)).to.equal(true);
+            expect(await registry.isManager(COMMUNITY_ID, bob.address)).to.equal(false);
         });
 
-        it("isCreator reflects new holder after creator badge transfer", async function () {
+        it("isManager reflects new holder after manager badge transfer", async function () {
             await badges.connect(alice).safeTransferFrom(alice.address, carol.address, COMMUNITY_ID, 1, "0x");
-            expect(await registry.isCreator(COMMUNITY_ID, alice.address)).to.equal(false);
-            expect(await registry.isCreator(COMMUNITY_ID, carol.address)).to.equal(true);
+            expect(await registry.isManager(COMMUNITY_ID, alice.address)).to.equal(false);
+            expect(await registry.isManager(COMMUNITY_ID, carol.address)).to.equal(true);
         });
 
-        it("onlyCreator functions accept new holder after transfer", async function () {
+        it("onlyManager functions accept new holder after transfer", async function () {
             await badges.connect(alice).safeTransferFrom(alice.address, carol.address, COMMUNITY_ID, 1, "0x");
             await expect(
                 registry.connect(carol).updateCommunityDetails(COMMUNITY_ID, "New name", "New desc")
@@ -386,8 +540,8 @@ describe("CommunityRegistry", function () {
 
     // ─── Badge contract restriction ────────────────────────────────────────────
 
-    describe("SocietyProtocolBadges — isCommunity restriction", function () {
-        it("direct createBadge(isCommunity=true) by non-registry reverts", async function () {
+    describe("SocietyProtocolBadges — isCommunityBadge restriction", function () {
+        it("direct createBadge(isCommunityBadge=true) by non-registry reverts", async function () {
             await expect(
                 (badges as any).connect(alice).createBadge(
                     "Rogue", false, true, ethers.ZeroAddress, "uri",
@@ -396,7 +550,7 @@ describe("CommunityRegistry", function () {
             ).to.be.revertedWithCustomError(badges, "AccessControlUnauthorizedAccount");
         });
 
-        it("direct createBadge(isCommunity=false) still works for anyone", async function () {
+        it("direct createBadge(isCommunityBadge=false) still works for anyone", async function () {
             await expect(
                 (badges as any).connect(alice).createBadge(
                     "Personal", false, false, ethers.ZeroAddress, "uri",

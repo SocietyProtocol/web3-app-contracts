@@ -7,15 +7,16 @@ import "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
 import "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
 import "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
 import "./ISocietyBadgeHook.sol";
+import "./SocietyProtocolBadges.sol";
 
 /**
  * @title Society VIP Manager
  * @notice Manages personal VIP tiers (Bronze, Silver, Gold) via staking, and community tiers via
  *         owner-granted time-limited grants.
  * @dev Implements ISocietyBadgeHook for personal VIP badges only.
- *      Community tiers are stored in a plain mapping and queried via getCommunityTier(communityId).
- *      To check whether a specific address holds a community tier, call getCommunityTier(communityId)
- *      and verify they hold the creator badge via badges.balanceOf(account, communityId) > 0.
+ *      Community tiers are stored in a plain mapping keyed by communityId (= manager badge ID) and
+ *      queried via getCommunityTier(communityId). Each active grant also assigns a representative
+ *      whose VIP badge visibility is surfaced through onBalanceOf() for the duration of the grant.
  */
 contract SocietyVipManager is
     Initializable,
@@ -28,6 +29,9 @@ contract SocietyVipManager is
     // -------------------------------------------------------------------------
     // Personal VIP state
     // -------------------------------------------------------------------------
+
+    /// @notice The Society Protocol Badges contract.
+    SocietyProtocolBadges public badges;
 
     /// @notice The ERC20 token used for staking.
     IERC20 public stakingToken;
@@ -48,13 +52,17 @@ contract SocietyVipManager is
 
     /// @notice The minimum duration required for the stake to be locked.
     uint256 public constant MIN_LOCK_DURATION = 30 days;
+    /// @notice The maximum allowed lock duration.
+    uint256 public constant MAX_LOCK_DURATION = 4 * 365 days;
 
     /**
      * @dev Struct to store user locking information.
+     * @param tierId The tier the user locked into: 1 = Bronze, 2 = Silver, 3 = Gold. Snapshot at lock time.
      * @param amount The total amount of staking tokens locked by the user.
      * @param unlockTime The timestamp when the lock expires and tokens can be withdrawn.
      */
     struct LockInfo {
+        uint256 tierId;
         uint256 amount;
         uint256 unlockTime;
     }
@@ -70,21 +78,24 @@ contract SocietyVipManager is
      * @dev Stores an owner-granted community tier.
      * @param tierId An owner-defined tier identifier (e.g. 1 = Bronze, 2 = Silver, 3 = Gold).
      * @param expiry Unix timestamp after which the tier is no longer active.
+     * @param representative Address that receives the same VIP tier badge via onBalanceOf.
      */
     struct CommunityTierGrant {
         uint256 tierId;
         uint256 expiry;
+        address representative;
     }
 
-    /// @notice communityId (= creator badge ID) => active community tier grant.
+    /// @notice communityId (= manager badge ID) => active community tier grant.
     mapping(uint256 => CommunityTierGrant) public communityTiers;
+
+    /// @notice Tracks which communityId a given address is currently representing (0 = none).
+    mapping(address => uint256) public representativeCommunity;
 
     // -------------------------------------------------------------------------
     // Errors
     // -------------------------------------------------------------------------
 
-    /// @notice Error thrown when the staking amount is less than the bronze tier requirement.
-    error InsufficientAmount();
     /// @notice Error thrown when the requested lock duration is shorter than the minimum allowed.
     error LockDurationTooShort();
     /// @notice Error thrown when attempting to unlock tokens while the lock is still active.
@@ -95,18 +106,39 @@ contract SocietyVipManager is
     error InvalidAddress();
     /// @notice Error thrown when tier amounts are zero or not strictly increasing.
     error InvalidTierAmounts();
+    /// @notice Error thrown when a user tries to create a new lock while an expired lock still holds tokens.
+    error ExpiredLockMustBeUnlockedFirst();
+    /// @notice Error thrown when the tierId is not 1 (Bronze), 2 (Silver), or 3 (Gold).
+    error InvalidTier();
+    /// @notice Error thrown when a user tries to call lock() while already having an active lock.
+    error LockAlreadyActive();
+    /// @notice Error thrown when upgradeTier is called with the same or a lower tier.
+    error CannotDowngradeTier();
+    /// @notice Error thrown when the requested lock duration exceeds the maximum allowed.
+    error LockDurationTooLong();
+    /// @notice Error thrown when changeRepresentative is called on a community with no active tier grant.
+    error NoCommunityTierGrant();
+    /// @notice Error thrown when the chosen representative already has an active staking lock.
+    error RepresentativeAlreadyLocked();
+    /// @notice Error thrown when a provided badge ID does not exist on the badges contract.
+    error InvalidBadgeId();
+    /// @notice Error thrown when an address is already an active representative for another community.
+    error AlreadyARepresentative();
 
     // -------------------------------------------------------------------------
     // Events
     // -------------------------------------------------------------------------
 
-    event TokensLocked(address indexed user, uint256 amount, uint256 unlockTime);
+    event TokensLocked(address indexed user, uint256 tierId, uint256 amount, uint256 unlockTime);
     event TokensUnlocked(address indexed user, uint256 amount);
+    event TierUpgraded(address indexed user, uint256 newTierId, uint256 newAmount, uint256 unlockTime);
     event AmountsUpdated(uint256 bronze, uint256 silver, uint256 gold);
     /// @notice Emitted when a community tier grant is created or overwritten.
-    event CommunityTierGranted(uint256 indexed communityId, uint256 tierId, uint256 expiry);
+    event CommunityTierGranted(uint256 indexed communityId, uint256 tierId, uint256 expiry, address indexed representative);
     /// @notice Emitted when a community tier grant is revoked before expiry.
     event CommunityTierRevoked(uint256 indexed communityId);
+    /// @notice Emitted when the representative of a community tier grant is changed.
+    event RepresentativeChanged(uint256 indexed communityId, address indexed oldRepresentative, address indexed newRepresentative);
 
     // -------------------------------------------------------------------------
     // Constructor / Initializer
@@ -119,6 +151,7 @@ contract SocietyVipManager is
 
     /**
      * @notice Initializes the VIP Manager.
+     * @param _badges Address of the SocietyProtocolBadges contract.
      * @param _stakingToken Address of the ERC20 token to use for staking.
      * @param _bronzeBadgeId ID of the pre-created Bronze VIP badge.
      * @param _silverBadgeId ID of the pre-created Silver VIP badge.
@@ -128,6 +161,7 @@ contract SocietyVipManager is
      * @param _goldAmount Minimum tokens required for Gold tier (must be >= silver).
      */
     function initialize(
+        address _badges,
         address _stakingToken,
         uint256 _bronzeBadgeId,
         uint256 _silverBadgeId,
@@ -136,12 +170,18 @@ contract SocietyVipManager is
         uint256 _silverAmount,
         uint256 _goldAmount
     ) public initializer {
-        if (_stakingToken == address(0)) revert InvalidAddress();
+        if (_badges == address(0) || _stakingToken == address(0)) revert InvalidAddress();
         if (_bronzeAmount == 0 || _silverAmount < _bronzeAmount || _goldAmount < _silverAmount)
             revert InvalidTierAmounts();
 
+        SocietyProtocolBadges b = SocietyProtocolBadges(_badges);
+        if (!b.badgeExists(_bronzeBadgeId)) revert InvalidBadgeId();
+        if (!b.badgeExists(_silverBadgeId)) revert InvalidBadgeId();
+        if (!b.badgeExists(_goldBadgeId))   revert InvalidBadgeId();
+
         __Ownable_init(msg.sender);
         __UUPSUpgradeable_init();
+        badges = b;
         stakingToken = IERC20(_stakingToken);
 
         bronzeBadgeId = _bronzeBadgeId;
@@ -173,29 +213,70 @@ contract SocietyVipManager is
     }
 
     /**
-     * @notice Locks tokens into a VIP tier for a specified duration.
-     * @dev Extends existing lock time if the new unlockTime is further in the future.
+     * @notice Returns the required staking amount for a given tier.
+     * @param tierId 1 = Bronze, 2 = Silver, 3 = Gold.
      */
-    function lock(uint256 amount, uint256 duration) external {
-        if (amount < bronzeAmount) revert InsufficientAmount();
+    function _tierAmount(uint256 tierId) internal view returns (uint256) {
+        if (tierId == 1) return bronzeAmount;
+        if (tierId == 2) return silverAmount;
+        if (tierId == 3) return goldAmount;
+        revert InvalidTier();
+    }
+
+    /**
+     * @notice Locks the required token amount for the chosen VIP tier.
+     * @dev The amount transferred is determined by the tier: 1 = bronzeAmount, 2 = silverAmount, 3 = goldAmount.
+     *      Reverts if the caller already has an active lock (use upgradeTier instead).
+     *      Reverts if the caller has an expired lock with unclaimed tokens (call unlock first).
+     * @param tierId  The target tier: 1 (Bronze), 2 (Silver), or 3 (Gold).
+     * @param duration Lock duration in seconds. Must be >= MIN_LOCK_DURATION.
+     */
+    function lock(uint256 tierId, uint256 duration) external {
+        uint256 amount = _tierAmount(tierId); // also validates tierId
         if (duration < MIN_LOCK_DURATION) revert LockDurationTooShort();
+        if (duration > MAX_LOCK_DURATION) revert LockDurationTooLong();
 
         LockInfo storage userLock = locks[msg.sender];
 
-        if (userLock.amount > 0 && block.timestamp < userLock.unlockTime) {
-            userLock.amount += amount;
-            uint256 newUnlockTime = block.timestamp + duration;
-            if (newUnlockTime > userLock.unlockTime) {
-                userLock.unlockTime = newUnlockTime;
+        if (userLock.amount > 0) {
+            if (block.timestamp < userLock.unlockTime) {
+                revert LockAlreadyActive();
+            } else {
+                revert ExpiredLockMustBeUnlockedFirst();
             }
-        } else {
-            // New lock or expired lock — start fresh
-            userLock.amount = amount;
-            userLock.unlockTime = block.timestamp + duration;
+        }
+        if (userLock.tierId != 0 && block.timestamp < userLock.unlockTime) {
+            revert LockAlreadyActive();
         }
 
+        userLock.tierId = tierId;
+        userLock.amount = amount;
+        userLock.unlockTime = block.timestamp + duration;
+
         stakingToken.safeTransferFrom(msg.sender, address(this), amount);
-        emit TokensLocked(msg.sender, amount, userLock.unlockTime);
+        emit TokensLocked(msg.sender, tierId, amount, userLock.unlockTime);
+    }
+
+    /**
+     * @notice Upgrades an active lock to a higher VIP tier.
+     * @dev Only the difference between the new and current locked amount is transferred.
+     *      The unlock time is unchanged. Cannot downgrade or stay at the same tier.
+     * @param newTierId The target tier: 1 (Bronze), 2 (Silver), or 3 (Gold). Must be higher than current tier.
+     */
+    function upgradeTier(uint256 newTierId) external {
+        LockInfo storage userLock = locks[msg.sender];
+        if (userLock.amount == 0) revert NoTokensLocked();
+        if (block.timestamp >= userLock.unlockTime) revert ExpiredLockMustBeUnlockedFirst();
+
+        uint256 newAmount = _tierAmount(newTierId); // also validates newTierId
+        if (newAmount <= userLock.amount) revert CannotDowngradeTier();
+
+        uint256 topUp = newAmount - userLock.amount;
+        userLock.tierId = newTierId;
+        userLock.amount = newAmount;
+
+        stakingToken.safeTransferFrom(msg.sender, address(this), topUp);
+        emit TierUpgraded(msg.sender, newTierId, newAmount, userLock.unlockTime);
     }
 
     /**
@@ -207,6 +288,7 @@ contract SocietyVipManager is
         if (block.timestamp < userLock.unlockTime) revert LockStillActive();
 
         uint256 amount = userLock.amount;
+        userLock.tierId = 0;
         userLock.amount = 0;
         userLock.unlockTime = 0;
 
@@ -221,24 +303,43 @@ contract SocietyVipManager is
     /**
      * @notice Grants a community tier to a community for a fixed duration.
      * @dev Only the contract owner can call this. Overwrites any existing grant.
-     *      Community tier ownership is not expressed as an ERC1155 badge balance — use
-     *      getCommunityTier(communityId) to read the tier and verify creator-badge ownership
-     *      separately via badges.balanceOf(account, communityId) > 0.
-     * @param communityId The community's identifier (= creator badge ID).
-     * @param tierId An identifier for the tier level (e.g. 1 = Bronze, 2 = Silver, 3 = Gold).
+     *      The representative receives the same VIP tier badge via onBalanceOf for the grant's duration.
+     *      If regranting with a different representative, the old representative's tier is cleared.
+     * @param communityId The community's identifier (= manager badge ID).
+     * @param tierId An identifier for the tier level (1 = Bronze, 2 = Silver, 3 = Gold).
      * @param duration Duration in seconds before the tier expires.
+     * @param representative Address that receives the VIP badge for the duration of the grant.
      */
     function grantCommunityTier(
         uint256 communityId,
         uint256 tierId,
-        uint256 duration
+        uint256 duration,
+        address representative
     ) external onlyOwner {
-        if (tierId == 0) revert InvalidTierAmounts();
+        if (tierId == 0 || tierId > 3) revert InvalidTier();
         if (duration == 0) revert LockDurationTooShort();
+        if (representative == address(0)) revert InvalidAddress();
+
+        CommunityTierGrant storage existingGrant = communityTiers[communityId];
+        address oldRepresentative = existingGrant.representative;
+        if (locks[representative].amount > 0) revert RepresentativeAlreadyLocked();
+        uint256 existingCommunity = representativeCommunity[representative];
+        if (existingCommunity != 0 && existingCommunity != communityId) {
+            if (block.timestamp < communityTiers[existingCommunity].expiry) revert AlreadyARepresentative();
+            delete representativeCommunity[representative];
+        }
 
         uint256 expiry = block.timestamp + duration;
-        communityTiers[communityId] = CommunityTierGrant({ tierId: tierId, expiry: expiry });
-        emit CommunityTierGranted(communityId, tierId, expiry);
+        if (oldRepresentative != address(0) && oldRepresentative != representative) {
+            if (representativeCommunity[oldRepresentative] == communityId) {
+                delete representativeCommunity[oldRepresentative];
+                if (locks[oldRepresentative].amount == 0) delete locks[oldRepresentative];
+            }
+        }
+        communityTiers[communityId] = CommunityTierGrant({ tierId: tierId, expiry: expiry, representative: representative });
+        locks[representative] = LockInfo({ tierId: tierId, amount: 0, unlockTime: expiry });
+        representativeCommunity[representative] = communityId;
+        emit CommunityTierGranted(communityId, tierId, expiry, representative);
     }
 
     /**
@@ -248,16 +349,46 @@ contract SocietyVipManager is
      */
     function revokeCommunityTier(uint256 communityId) external onlyOwner {
         if (communityTiers[communityId].expiry == 0) return;
+        address rep = communityTiers[communityId].representative;
         delete communityTiers[communityId];
+        if (representativeCommunity[rep] == communityId) {
+            delete representativeCommunity[rep];
+            if (locks[rep].amount == 0) delete locks[rep];
+        }
         emit CommunityTierRevoked(communityId);
+    }
+
+    /**
+     * @notice Transfers the community VIP grant to a new representative, preserving the original expiry.
+     * @dev Removes the lock from the old representative and assigns it to the new one.
+     * @param communityId The community whose representative is being changed.
+     * @param newRepresentative The address that will receive the VIP tier lock.
+     */
+    function changeRepresentative(uint256 communityId, address newRepresentative) external onlyOwner {
+        if (newRepresentative == address(0)) revert InvalidAddress();
+        CommunityTierGrant storage grant = communityTiers[communityId];
+        if (grant.expiry == 0 || block.timestamp >= grant.expiry) revert NoCommunityTierGrant();
+
+        if (locks[newRepresentative].amount > 0) revert RepresentativeAlreadyLocked();
+        uint256 existingCommunity = representativeCommunity[newRepresentative];
+        if (existingCommunity != 0) {
+            if (block.timestamp < communityTiers[existingCommunity].expiry) revert AlreadyARepresentative();
+            delete representativeCommunity[newRepresentative];
+        }
+
+        address oldRep = grant.representative;
+        if (locks[oldRep].amount == 0) delete locks[oldRep];
+        delete representativeCommunity[oldRep];
+        grant.representative = newRepresentative;
+        locks[newRepresentative] = LockInfo({ tierId: grant.tierId, amount: 0, unlockTime: grant.expiry });
+        representativeCommunity[newRepresentative] = communityId;
+        emit RepresentativeChanged(communityId, oldRep, newRepresentative);
     }
 
     /**
      * @notice Returns the active community tier for a given community.
      * @dev Returns (0, 0) if the community has no grant or the grant has expired.
-     *      Pair with badges.balanceOf(account, communityId) > 0 to confirm the queried
-     *      address currently holds the creator badge.
-     * @param communityId The community to query (= creator badge ID).
+     * @param communityId The community to query (= manager badge ID).
      * @return tierId The active tier identifier, or 0 if none.
      * @return expiry The unix timestamp when the tier expires, or 0 if none.
      */
@@ -288,15 +419,16 @@ contract SocietyVipManager is
 
     /**
      * @notice Returns 1 if the account holds the personal VIP badge based on their staked amount.
-     * @dev Community tier badges are not routed through this hook — use getCommunityTier instead.
+     * @dev Community-tier representatives are also reflected through the same lock mapping.
+     *      Tier visibility is exclusive: Bronze shows only Bronze, Silver only Silver, Gold only Gold.
      */
     function onBalanceOf(address account, uint256 id) external view returns (uint256) {
         LockInfo storage userLock = locks[account];
-        if (block.timestamp >= userLock.unlockTime || userLock.amount == 0) return 0;
+        if (block.timestamp >= userLock.unlockTime || userLock.tierId == 0) return 0;
 
-        if (id == goldBadgeId)   return userLock.amount >= goldAmount   ? 1 : 0;
-        if (id == silverBadgeId) return userLock.amount >= silverAmount ? 1 : 0;
-        if (id == bronzeBadgeId) return userLock.amount >= bronzeAmount ? 1 : 0;
+        if (id == goldBadgeId)   return userLock.tierId == 3 ? 1 : 0;
+        if (id == silverBadgeId) return userLock.tierId == 2 ? 1 : 0;
+        if (id == bronzeBadgeId) return userLock.tierId == 1 ? 1 : 0;
 
         return 0;
     }

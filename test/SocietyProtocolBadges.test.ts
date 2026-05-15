@@ -55,8 +55,8 @@ describe("Society Protocol Badges (Upgradeable) - Refactored", function () {
                 ethers.ZeroAddress,
                 "ipfs://official",
                 [PERM_EVERYONE], // Mint
-                [PERM_EVERYONE], // Transfer
-                [PERM_EVERYONE],  // Burn
+                [PERM_SELF],     // Transfer
+                [],              // Burn
                 [creator.address] // Editors
             );
             const id = STARTING_BADGE_ID + 1n;
@@ -98,7 +98,7 @@ describe("Society Protocol Badges (Upgradeable) - Refactored", function () {
             const id = STARTING_BADGE_ID + 1n;
             const badge = await badges.badges(id);
             expect(badge.name).to.equal("Public Badge");
-            expect(badge.isCommunity).to.be.true;
+            expect(badge.isCommunityBadge).to.be.true;
         });
 
         it("Non-official creator should NOT be able to create official badges", async function () {
@@ -114,11 +114,11 @@ describe("Society Protocol Badges (Upgradeable) - Refactored", function () {
 
         beforeEach(async function () {
             // Create an "Auth" badge that everyone can mint freely
-            await badges.createBadge("Auth Badge", false, false, ethers.ZeroAddress, "ipfs://auth", [PERM_EVERYONE], [PERM_EVERYONE], [], [owner.address]);
+            await badges.createBadge("Auth Badge", false, false, ethers.ZeroAddress, "ipfs://auth", [PERM_EVERYONE], [], [], [owner.address]);
             authBadgeId = STARTING_BADGE_ID + 1n;
 
             // Create a "Gated" badge that requires holding "Auth Badge" to mint
-            await badges.createBadge("Gated Badge", false, false, ethers.ZeroAddress, "ipfs://gated", [authBadgeId], [PERM_EVERYONE], [], [owner.address]);
+            await badges.createBadge("Gated Badge", false, false, ethers.ZeroAddress, "ipfs://gated", [authBadgeId], [], [], [owner.address]);
             gatedBadgeId = STARTING_BADGE_ID + 2n;
         });
 
@@ -189,7 +189,7 @@ describe("Society Protocol Badges (Upgradeable) - Refactored", function () {
         it("Should emit BadgePermissions event on badge creation", async function () {
             const id = STARTING_BADGE_ID + 1n;
             const minters = [PERM_EVERYONE];
-            const transferers = [STARTING_BADGE_ID];
+            const transferers = [PERM_SELF];
             const burners = [] as bigint[];
             const editors = [creator.address, user1.address];
 
@@ -226,9 +226,9 @@ describe("Society Protocol Badges (Upgradeable) - Refactored", function () {
         });
 
         it("Should return correct permissions via getters", async function () {
-            const minters = [PERM_EVERYONE, STARTING_BADGE_ID];
-            const transferers = [STARTING_BADGE_ID];
-            const burners = [PERM_EVERYONE];
+            const minters = [PERM_EVERYONE, PERM_SELF];
+            const transferers = [PERM_SELF];
+            const burners = [PERM_SELF];
             const editors = [owner.address, creator.address];
 
             await badges.connect(creator).createBadge(
@@ -300,14 +300,48 @@ describe("Society Protocol Badges (Upgradeable) - Refactored", function () {
     });
 
     describe("Profiles", function () {
-        it("Should create a profile and allow self-minting internally", async function () {
+        it("Should create a profile and set isProfileBadge flag", async function () {
             await badges.connect(user1).createProfile("ipfs://profile");
             const pid = await badges.profileBadgeId(user1.address);
 
             expect(await badges.balanceOf(user1.address, pid)).to.equal(1);
+            expect(await badges.isProfileBadge(pid)).to.equal(true);
+            expect(await (badges as any)["totalSupply(uint256)"](pid)).to.equal(1);
+        });
 
-            // createProfile prevents creating another.
-            await expect(badges.connect(user1).createProfile("ipfs://2")).to.be.revertedWithCustomError(badges, "ProfileAlreadyExists");
+        it("Should revert if user tries to create a second profile", async function () {
+            await badges.connect(user1).createProfile("ipfs://profile");
+            await expect(badges.connect(user1).createProfile("ipfs://2"))
+                .to.be.revertedWithCustomError(badges, "ProfileAlreadyExists");
+        });
+
+        it("Should revert with ProfileMustBeUnique when minting more supply of a profile badge", async function () {
+            await badges.connect(user1).createProfile("ipfs://profile");
+            const pid = await badges.profileBadgeId(user1.address);
+
+            // Attempt to mint a second copy — must be blocked regardless of who tries
+            await expect(badges.connect(user2).mint(user2.address, pid, 1, "0x"))
+                .to.be.revertedWithCustomError(badges, "ProfileMustBeUnique");
+            await expect(badges.connect(user1).mint(user1.address, pid, 1, "0x"))
+                .to.be.revertedWithCustomError(badges, "ProfileMustBeUnique");
+        });
+
+        it("Should block reentrant extra minting via onERC1155Received callback", async function () {
+            const ReceiverFactory = await ethers.getContractFactory("MockReentrantProfileReceiver");
+            const receiver = await ReceiverFactory.deploy(await badges.getAddress());
+            await receiver.waitForDeployment();
+
+            // The receiver calls createProfile and attempts to re-mint inside the callback
+            await receiver.createProfile("ipfs://reentrant");
+
+            // Profile was created with exactly 1 copy
+            const pid = await badges.profileBadgeId(await receiver.getAddress());
+            expect(await (badges as any)["totalSupply(uint256)"](pid)).to.equal(1);
+            expect(await badges.balanceOf(await receiver.getAddress(), pid)).to.equal(1);
+
+            // The reentry was attempted but blocked
+            expect(await receiver.reentryAttempted()).to.equal(true);
+            expect(await receiver.reentrySucceeded()).to.equal(false);
         });
 
         it("Should allow profile owner to update URI", async function () {
@@ -323,6 +357,45 @@ describe("Society Protocol Badges (Upgradeable) - Refactored", function () {
             const pid = await badges.profileBadgeId(user1.address);
 
             await expect(badges.connect(user2).updateProfileURI(pid, "ipfs://p-hacked"))
+                .to.be.revertedWithCustomError(badges, "NotProfileOwner");
+        });
+
+        it("Should REVERT when updateProfileURI is called with a non-profile badge ID", async function () {
+            // Create a regular badge with PERM_SELF so user1 can mint one copy (supply = 1)
+            const tx = await badges.createBadge(
+                "One-of-one", false, false, ethers.ZeroAddress, "ipfs://unique",
+                [1n], [], [], [owner.address]
+            );
+            const receipt = await tx.wait();
+            const event = receipt?.logs.find((l: any) => l.fragment?.name === "BadgeCreated") as any;
+            const badgeId = event?.args[0] as bigint;
+
+            await badges.connect(user1).mint(user1.address, badgeId, 1, "0x");
+
+            // user1 holds the only copy — but it is not their profile badge
+            await expect(badges.connect(user1).updateProfileURI(badgeId, "ipfs://hacked"))
+                .to.be.revertedWithCustomError(badges, "NotProfileOwner");
+        });
+
+        it("Should REVERT when profile owner tries to set a hook on their profile badge", async function () {
+            await badges.connect(user1).createProfile("ipfs://p1");
+            const pid = await badges.profileBadgeId(user1.address);
+
+            await expect(badges.connect(user1).setBadgeHook(pid, owner.address))
+                .to.be.revertedWithCustomError(badges, "Unauthorized");
+        });
+
+        it("Should REVERT when updateProfileURI is called with a wrong profile badge ID", async function () {
+            await badges.connect(user1).createProfile("ipfs://p1");
+            await badges.connect(user2).createProfile("ipfs://p2");
+
+            const pid1 = await badges.profileBadgeId(user1.address);
+            const pid2 = await badges.profileBadgeId(user2.address);
+
+            // user1 cannot update user2's profile badge, and vice versa
+            await expect(badges.connect(user1).updateProfileURI(pid2, "ipfs://hacked"))
+                .to.be.revertedWithCustomError(badges, "NotProfileOwner");
+            await expect(badges.connect(user2).updateProfileURI(pid1, "ipfs://hacked"))
                 .to.be.revertedWithCustomError(badges, "NotProfileOwner");
         });
     });
@@ -428,6 +501,130 @@ describe("Society Protocol Badges (Upgradeable) - Refactored", function () {
                 .to.be.revertedWithCustomError(badges, "BadgeDoesNotExist");
             await expect(badges.burn(user1.address, badId, 1))
                 .to.be.revertedWithCustomError(badges, "BadgeDoesNotExist");
+        });
+
+        it("Should revert for ID equal to STARTING_BADGE_ID (reserved boundary)", async function () {
+            await expect(badges.mint(user1.address, STARTING_BADGE_ID, 1, "0x"))
+                .to.be.revertedWithCustomError(badges, "BadgeDoesNotExist");
+        });
+
+        it("Should revert for ID 0", async function () {
+            await expect(badges.mint(user1.address, 0n, 1, "0x"))
+                .to.be.revertedWithCustomError(badges, "BadgeDoesNotExist");
+        });
+
+        it("Should revert for nextTokenId + 1 (not yet created)", async function () {
+            await badges.createBadge("Badge", false, false, ethers.ZeroAddress, "ipfs://a",
+                [PERM_EVERYONE], [], [], [owner.address]);
+            const nextId = await badges.nextTokenId() + 1n;
+            await expect(badges.mint(user1.address, nextId, 1, "0x"))
+                .to.be.revertedWithCustomError(badges, "BadgeDoesNotExist");
+        });
+
+        it("Should succeed for a valid created badge ID", async function () {
+            await badges.createBadge("Badge", false, false, ethers.ZeroAddress, "ipfs://a",
+                [PERM_EVERYONE], [], [], [owner.address]);
+            const validId = await badges.nextTokenId();
+            await expect(badges.mint(user1.address, validId, 1, "0x")).to.not.be.reverted;
+        });
+    });
+
+    describe("H04 — Permission Rule Validation & Hook-Aware balanceOf", function () {
+        it("Should revert createBadge if a minter rule references a non-existent badge ID", async function () {
+            const futureId = STARTING_BADGE_ID + 99n; // never created
+            await expect(
+                badges.createBadge("Bad Rules", false, false, ethers.ZeroAddress, "ipfs://bad",
+                    [futureId], [], [], [owner.address])
+            ).to.be.revertedWithCustomError(badges, "InvalidPermissionRule");
+        });
+
+        it("Should revert createBadge if a rule value is in the reserved range (3-9)", async function () {
+            const reservedId = 5n;
+            await expect(
+                badges.createBadge("Reserved Rule", false, false, ethers.ZeroAddress, "ipfs://r",
+                    [], [reservedId], [], [owner.address])
+            ).to.be.revertedWithCustomError(badges, "InvalidPermissionRule");
+        });
+
+        it("Should allow createBadge with PERM_EVERYONE in mint and PERM_SELF elsewhere", async function () {
+            await expect(
+                badges.createBadge("Open Badge", false, false, ethers.ZeroAddress, "ipfs://open",
+                    [PERM_EVERYONE], [PERM_SELF], [PERM_SELF], [owner.address])
+            ).to.not.be.reverted;
+        });
+
+        it("Should revert if PERM_EVERYONE is used in transfer rules", async function () {
+            await expect(
+                badges.createBadge("Bad Transfer", false, false, ethers.ZeroAddress, "ipfs://bad",
+                    [], [PERM_EVERYONE], [], [owner.address])
+            ).to.be.revertedWithCustomError(badges, "InvalidPermissionRule");
+        });
+
+        it("Should revert if PERM_EVERYONE is used in burn rules", async function () {
+            await expect(
+                badges.createBadge("Bad Burn", false, false, ethers.ZeroAddress, "ipfs://bad",
+                    [], [], [PERM_EVERYONE], [owner.address])
+            ).to.be.revertedWithCustomError(badges, "InvalidPermissionRule");
+        });
+
+        it("Should allow createBadge using an existing badge ID as a rule", async function () {
+            // Create first badge
+            await badges.createBadge("Auth", false, false, ethers.ZeroAddress, "ipfs://a",
+                [PERM_EVERYONE], [], [], [owner.address]);
+            const authId = STARTING_BADGE_ID + 1n;
+
+            // Create second badge gated on the first
+            await expect(
+                badges.createBadge("Gated", false, false, ethers.ZeroAddress, "ipfs://g",
+                    [authId], [], [], [owner.address])
+            ).to.not.be.reverted;
+        });
+
+        it("Should revert createBadge if a permission array exceeds MAX_PERMISSION_RULES (10)", async function () {
+            const tooMany = Array.from({ length: 11 }, () => PERM_EVERYONE);
+            await expect(
+                badges.createBadge("TooMany", false, false, ethers.ZeroAddress, "ipfs://tm",
+                    tooMany, [], [], [owner.address])
+            ).to.be.revertedWithCustomError(badges, "TooManyPermissionRules");
+
+            await expect(
+                badges.createBadge("TooMany", false, false, ethers.ZeroAddress, "ipfs://tm",
+                    [], tooMany, [], [owner.address])
+            ).to.be.revertedWithCustomError(badges, "TooManyPermissionRules");
+
+            await expect(
+                badges.createBadge("TooMany", false, false, ethers.ZeroAddress, "ipfs://tm",
+                    [], [], tooMany, [owner.address])
+            ).to.be.revertedWithCustomError(badges, "TooManyPermissionRules");
+        });
+
+        it("Hook-inflated balanceOf should NOT grant badge-gated mint permission", async function () {
+            // Create auth badge
+            await badges.createBadge("Auth", false, false, ethers.ZeroAddress, "ipfs://auth",
+                [PERM_EVERYONE], [], [], [owner.address]);
+            const authId = STARTING_BADGE_ID + 1n;
+
+            // Create gated badge requiring authId
+            await badges.createBadge("Gated", false, false, ethers.ZeroAddress, "ipfs://gated",
+                [authId], [], [], [owner.address]);
+            const gatedId = STARTING_BADGE_ID + 2n;
+
+            // Attach a hook to authId that inflates balanceOf to 1 for everyone
+            const Hook = await ethers.getContractFactory("MockHook");
+            const inflatingHook = await Hook.deploy(true, true, true);
+            await inflatingHook.waitForDeployment();
+            await inflatingHook.setMockBalance(1); // hook claims everyone holds authId
+
+            await badges.setBadgeHook(authId, await inflatingHook.getAddress());
+
+            // user1 holds NO actual authId tokens — hook lies, but super.balanceOf should return 0
+            expect(await badges.balanceOf(user1.address, authId)).to.equal(1n); // hook inflates
+            expect(await (badges as any)["totalSupply(uint256)"](authId)).to.equal(0n); // real is 0
+
+            // Minting gated badge should fail because the permission check uses super.balanceOf
+            await expect(
+                badges.connect(user1).mint(user1.address, gatedId, 1, "0x")
+            ).to.be.revertedWithCustomError(badges, "MintNotAuthorized");
         });
     });
 });

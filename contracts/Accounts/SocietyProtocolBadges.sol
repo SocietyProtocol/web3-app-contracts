@@ -7,9 +7,7 @@ import "@openzeppelin/contracts-upgradeable/token/ERC1155/extensions/ERC1155Supp
 import "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
 import "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
 import "@openzeppelin/contracts-upgradeable/utils/cryptography/EIP712Upgradeable.sol";
-import "@openzeppelin/contracts/utils/cryptography/SignatureChecker.sol";
-import "@openzeppelin/contracts/utils/cryptography/MessageHashUtils.sol";
-import "@openzeppelin/contracts/utils/Strings.sol";
+import "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
 import "./ISocietyBadgeHook.sol";
 
 /// @title Society Protocol Badges
@@ -37,32 +35,35 @@ contract SocietyProtocolBadges is
     uint256 public constant PERM_SELF = 1;
     /// @notice Permission type: Anyone can perform the action.
     uint256 public constant PERM_EVERYONE = 2;
-    /// @notice The first valid ID for dynamic/user-created badges. IDs below this are reserved.
+    /// @notice IDs up to and including this value are reserved. The first badge ID is STARTING_BADGE_ID + 1.
     uint256 public constant STARTING_BADGE_ID = 10;
+    /// @notice Maximum number of rules allowed per permission array (canMint/canTransfer/canBurn).
+    uint256 public constant MAX_PERMISSION_RULES = 10;
 
     /// @dev EIP-712 typehash for invitations.
     bytes32 private constant INVITE_TYPEHASH =
-        keccak256("Invite(address inviter,string message)");
+        keccak256("Invite(address inviter,address invitee,uint256 nonce,uint256 expiry)");
 
-    /**
-     * @notice Maps a user's address to the address of the person who invited them.
-     * @dev Used for tracking the invitation graph and preventing circular/self invitations.
-     */
-    mapping(address => address) public invitedBy;
+    /// @notice Returns true if inviter has already had their invite accepted by invitee.
+    mapping(address => mapping(address => bool)) public hasInvited;
+    /// @notice Returns true if a nonce has been consumed for a given inviter.
+    mapping(address => mapping(uint256 => bool)) public usedNonces;
+    /// @notice Ordered list of invitees per inviter.
+    mapping(address => address[]) private _invitees;
 
     /**
      * @dev Core information for a badge type.
      * @param name Human-readable name of the badge.
      * @param hook Optional address of a contract implementing ISocietyBadgeHook for dynamic logic.
      * @param isOfficial True if the badge is an official protocol-level badge.
-     * @param isCommunity True if the badge has community-specific properties.
+     * @param isCommunityBadge True if the badge has community-specific properties.
      * @param metadataURI The IPFS or HTTPS link to the badge's metadata.
      */
     struct BadgeInfo {
         string name;
         address hook;
         bool isOfficial;
-        bool isCommunity;
+        bool isCommunityBadge;
         string metadataURI;
     }
 
@@ -97,25 +98,33 @@ contract SocietyProtocolBadges is
      */
     mapping(address => uint256) public profileBadgeId;
 
-    /// @notice The ID that will be assigned to the next created badge.
+    /// @notice True if the badge ID was created as a user profile badge.
+    mapping(uint256 => bool) public isProfileBadge;
+
+    /// @dev Per-badge mint mutex set during the ERC1155 callback window to block reentrant extra mints.
+    mapping(uint256 => bool) private _profileMintLocked;
+
+    /// @notice The most recently assigned badge ID. The next badge will receive nextTokenId + 1.
     uint256 public nextTokenId;
 
-    /// @dev Tracks which badge IDs have been created. Used for existence checks.
-    mapping(uint256 => bool) private _badgeCreated;
+    /// @dev Returns true if the badge ID has been created.
+    function _badgeExists(uint256 id) internal view returns (bool) {
+        return id > STARTING_BADGE_ID && id <= nextTokenId;
+    }
 
     /**
      * @notice Emitted when a new badge type is created.
      * @param id The unique ID assigned to the new badge.
      * @param name human-readable name of the badge.
      * @param isOfficial True if created as an official badge.
-     * @param isCommunity True if created as a community badge.
+     * @param isCommunityBadge True if created as a community badge.
      * @param creator The address that initiated the creation.
      */
     event BadgeCreated(
         uint256 indexed id,
         string name,
         bool isOfficial,
-        bool isCommunity,
+        bool isCommunityBadge,
         address indexed creator
     );
     /**
@@ -125,7 +134,7 @@ contract SocietyProtocolBadges is
         uint256 indexed id,
         string name,
         bool isOfficial,
-        bool isCommunity,
+        bool isCommunityBadge,
         string metadataURI
     );
     /**
@@ -151,7 +160,7 @@ contract SocietyProtocolBadges is
     /// @notice Emitted when a user creates their unique profile badge.
     event ProfileCreated(address indexed user, uint256 indexed id);
     /// @notice Emitted when a user successfully accepts an invitation.
-    event UserInvited(address indexed user, address indexed inviter);
+    event UserInvited(address indexed inviter, address indexed invitee, uint256 nonce);
 
     // --- Custom Errors ---
     /// @notice Generic unauthorized access error.
@@ -162,6 +171,8 @@ contract SocietyProtocolBadges is
     error NotProfileOwner();
     /// @notice User attempted to create a second profile badge.
     error ProfileAlreadyExists();
+    /// @notice Attempted to mint more than one instance of a profile badge.
+    error ProfileMustBeUnique();
     /// @notice The badge's hook contract denied the minting operation.
     error MintDeniedByHook();
     /// @notice The badge's hook contract denied the transfer operation.
@@ -180,8 +191,18 @@ contract SocietyProtocolBadges is
     error InvalidSignature();
     /// @notice A user attempted to invite themselves.
     error SelfInvitation();
-    /// @notice A circular invitation was detected (e.g., A invited B, and B attempted to invite A).
+    /// @notice A circular invitation was detected (invitee has already invited the inviter).
     error CircularInvitation();
+    /// @notice The invite signature has passed its expiry timestamp.
+    error SignatureExpired();
+    /// @notice This nonce has already been used by the inviter.
+    error NonceAlreadyUsed();
+    /// @notice A permission rule references an ID that is not a valid constant or existing badge.
+    error InvalidPermissionRule(uint256 rule);
+    /// @notice A permission array exceeds the maximum allowed length.
+    error TooManyPermissionRules();
+    /// @notice The hook address provided is already set on this badge.
+    error HookAlreadySet();
 
     /// @custom:oz-upgrades-unsafe-allow constructor
     constructor() {
@@ -209,7 +230,7 @@ contract SocietyProtocolBadges is
      * @notice Creates a new badge type with specific metadata and permissions.
      * @param name Human-readable name.
      * @param isOfficial If true, requires the caller to have `OFFICIAL_BADGE_CREATOR_ROLE`.
-     * @param isCommunity Flag for community categorization.
+     * @param isCommunityBadge Flag for community categorization.
      * @param hook Address of the custom logic contract (optional).
      * @param metadataURI IPFS/HTTPS link to metadata.
      * @param minters Array of IDs/constants allowed to mint.
@@ -221,7 +242,7 @@ contract SocietyProtocolBadges is
     function createBadge(
         string memory name,
         bool isOfficial,
-        bool isCommunity,
+        bool isCommunityBadge,
         address hook,
         string memory metadataURI,
         uint256[] memory minters,
@@ -238,7 +259,7 @@ contract SocietyProtocolBadges is
                 );
             }
         }
-        if (isCommunity) {
+        if (isCommunityBadge) {
             if (!hasRole(COMMUNITY_MANAGER_ROLE, msg.sender)) {
                 revert AccessControlUnauthorizedAccount(
                     msg.sender,
@@ -250,7 +271,7 @@ contract SocietyProtocolBadges is
             _createBadge(
                 name,
                 isOfficial,
-                isCommunity,
+                isCommunityBadge,
                 hook,
                 metadataURI,
                 minters,
@@ -271,10 +292,9 @@ contract SocietyProtocolBadges is
         if (profileBadgeId[msg.sender] != 0) revert ProfileAlreadyExists();
 
         uint256[] memory empty = new uint256[](0);
-        address[] memory editors = new address[](1);
-        editors[0] = msg.sender;
+        address[] memory noEditors = new address[](0);
 
-        // Create the badge type
+        // Create the badge type — no editors: updateProfileURI has its own ownership check
         uint256 pid = _createBadge(
             "Profile",
             false,
@@ -284,8 +304,11 @@ contract SocietyProtocolBadges is
             empty,
             empty,
             empty,
-            editors
+            noEditors
         );
+
+        // Mark as profile badge before minting so _update can enforce the supply cap
+        isProfileBadge[pid] = true;
 
         // Temporarily allow self-minting for the creation transaction
         canMint[pid].push(PERM_SELF);
@@ -299,10 +322,24 @@ contract SocietyProtocolBadges is
     /**
      * @dev Internal helper for badge creation logic.
      */
+    function _validateRules(uint256[] memory rules, bool allowEveryone) internal view {
+        if (rules.length > MAX_PERMISSION_RULES) revert TooManyPermissionRules();
+        for (uint256 i = 0; i < rules.length; i++) {
+            uint256 rule = rules[i];
+            if (rule == PERM_EVERYONE) {
+                if (!allowEveryone) revert InvalidPermissionRule(rule);
+            } else if (rule != PERM_SELF) {
+                if (rule < STARTING_BADGE_ID || !_badgeExists(rule)) {
+                    revert InvalidPermissionRule(rule);
+                }
+            }
+        }
+    }
+
     function _createBadge(
         string memory name,
         bool isOfficial,
-        bool isCommunity,
+        bool isCommunityBadge,
         address hook,
         string memory metadataURI,
         uint256[] memory minters,
@@ -310,15 +347,18 @@ contract SocietyProtocolBadges is
         uint256[] memory burners,
         address[] memory editors
     ) internal returns (uint256) {
+        _validateRules(minters, true);
+        _validateRules(transferers, false);
+        _validateRules(burners, false);
+
         nextTokenId++;
         uint256 id = nextTokenId;
-        _badgeCreated[id] = true;
 
         badges[id] = BadgeInfo({
             name: name,
             hook: hook,
             isOfficial: isOfficial,
-            isCommunity: isCommunity,
+            isCommunityBadge: isCommunityBadge,
             metadataURI: metadataURI
         });
 
@@ -336,7 +376,7 @@ contract SocietyProtocolBadges is
             emit EditorsUpdated(id, editors[i], true);
         }
 
-        emit BadgeCreated(id, name, isOfficial, isCommunity, msg.sender);
+        emit BadgeCreated(id, name, isOfficial, isCommunityBadge, msg.sender);
         emit BadgePermissions(id, minters, transferers, burners, editors);
         return id;
     }
@@ -348,6 +388,7 @@ contract SocietyProtocolBadges is
      */
     function setBadgeHook(uint256 id, address hook) external {
         if (!canEdit[id][msg.sender]) revert Unauthorized();
+        if (badges[id].hook == hook) revert HookAlreadySet();
         badges[id].hook = hook;
         emit HookUpdated(id, hook);
     }
@@ -355,7 +396,7 @@ contract SocietyProtocolBadges is
     /**
      * @notice Modifies a badge's name, official status, and URI.
      * @dev Toggling official status requires `OFFICIAL_BADGE_CREATOR_ROLE`.
-     *      The `isCommunity` flag is immutable after badge creation.
+     *      The `isCommunityBadge` flag is immutable after badge creation.
      */
     function modifyBadge(
         uint256 id,
@@ -363,7 +404,7 @@ contract SocietyProtocolBadges is
         bool isOfficial,
         string memory metadataURI
     ) external {
-        if (!_badgeCreated[id]) revert BadgeDoesNotExist();
+        if (!_badgeExists(id)) revert BadgeDoesNotExist();
 
         // Check edit permission
         if (!canEdit[id][msg.sender]) revert Unauthorized();
@@ -385,7 +426,7 @@ contract SocietyProtocolBadges is
         badge.isOfficial = isOfficial;
         badge.metadataURI = metadataURI;
 
-        emit BadgeModified(id, name, isOfficial, badge.isCommunity, metadataURI);
+        emit BadgeModified(id, name, isOfficial, badge.isCommunityBadge, metadataURI);
         emit URI(metadataURI, id);
     }
 
@@ -398,7 +439,7 @@ contract SocietyProtocolBadges is
         uint256 amount,
         bytes memory data
     ) public {
-        if (!_badgeCreated[id]) revert BadgeDoesNotExist();
+        if (!_badgeExists(id)) revert BadgeDoesNotExist();
         // Permission check is done in _update
         _mint(to, id, amount, data);
     }
@@ -413,7 +454,7 @@ contract SocietyProtocolBadges is
         bytes memory data
     ) public {
         for (uint256 i = 0; i < ids.length; i++) {
-            if (!_badgeCreated[ids[i]]) revert BadgeDoesNotExist();
+            if (!_badgeExists(ids[i])) revert BadgeDoesNotExist();
         }
         // Permission check is done in _update
         _mintBatch(to, ids, amounts, data);
@@ -455,7 +496,7 @@ contract SocietyProtocolBadges is
      * @notice Standard public burn function.
      */
     function burn(address from, uint256 id, uint256 value) public {
-        if (!_badgeCreated[id]) revert BadgeDoesNotExist();
+        if (!_badgeExists(id)) revert BadgeDoesNotExist();
         _burn(from, id, value);
     }
 
@@ -468,7 +509,7 @@ contract SocietyProtocolBadges is
         uint256[] memory values
     ) public {
         for (uint256 i = 0; i < ids.length; i++) {
-            if (!_badgeCreated[ids[i]]) revert BadgeDoesNotExist();
+            if (!_badgeExists(ids[i])) revert BadgeDoesNotExist();
         }
         _burnBatch(from, ids, values);
     }
@@ -482,7 +523,7 @@ contract SocietyProtocolBadges is
         uint256 amount,
         bytes memory data
     ) public {
-        if (!_badgeCreated[id]) revert BadgeDoesNotExist();
+        if (!_badgeExists(id)) revert BadgeDoesNotExist();
         for (uint256 i = 0; i < to.length; i++) {
             // Permission check is done in _update for each mint
             _mint(to[i], id, amount, data);
@@ -503,9 +544,7 @@ contract SocietyProtocolBadges is
      * @notice Specifically for profile badges, allows the user holding it to update their metadata link.
      */
     function updateProfileURI(uint256 id, string memory newUri) external {
-        // Allow update if sender owns the token and it's a unique NFT (Profile)
-        if (totalSupply(id) != 1 || balanceOf(msg.sender, id) != 1)
-            revert NotProfileOwner();
+        if (profileBadgeId[msg.sender] != id) revert NotProfileOwner();
 
         badges[id].metadataURI = newUri;
         emit URI(newUri, id);
@@ -566,63 +605,47 @@ contract SocietyProtocolBadges is
     }
 
     /**
-     * @notice Accepts an invitation signed by an existing protocol user.
-     * @dev This prevents bots by requiring a signature from a valid user. 
-     * Verifies that the signed message ends with the caller's hexadecimal address.
-     * @param inviter The address of the user who signed the invitation.
-     * @param message The signed string message.
-     * @param signature The EIP-712 or personal sign signature.
+     * @notice Accepts an invitation signed by an inviter.
+     * @dev Caller must be the invitee encoded in the signature — cannot be forwarded.
+     * @param inviter  Address that created and signed the invite.
+     * @param nonce    Unique value chosen by the inviter; allows multiple pending invites.
+     * @param expiry   Unix timestamp after which the signature is no longer valid.
+     * @param signature EIP-712 signature from the inviter.
      */
     function acceptInvite(
         address inviter,
-        string calldata message,
+        uint256 nonce,
+        uint256 expiry,
         bytes calldata signature
     ) external {
-        if (invitedBy[msg.sender] != address(0)) revert AlreadyInvited();
         if (inviter == msg.sender) revert SelfInvitation();
-        if (invitedBy[inviter] == msg.sender) revert CircularInvitation();
+        if (hasInvited[msg.sender][inviter]) revert CircularInvitation();
+        if (block.timestamp > expiry) revert SignatureExpired();
+        if (usedNonces[inviter][nonce]) revert NonceAlreadyUsed();
+        if (hasInvited[inviter][msg.sender]) revert AlreadyInvited();
 
-        bytes memory msgBytes = bytes(message);
-        uint256 len = msgBytes.length;
-        if (len < 42) revert InvalidSignature();
+        bytes32 digest = _hashTypedDataV4(keccak256(abi.encode(
+            INVITE_TYPEHASH,
+            inviter,
+            msg.sender,
+            nonce,
+            expiry
+        )));
 
-        // Extract the trailing address string from the message
-        bytes memory addressBytes = new bytes(42);
-        for (uint256 i = 0; i < 42; i++) {
-            addressBytes[i] = msgBytes[len - 42 + i];
-        }
+        if (ECDSA.recover(digest, signature) != inviter) revert InvalidSignature();
 
-        // Validate that the message suffix matches the caller's address in hex
-        if (
-            keccak256(addressBytes) !=
-            keccak256(bytes(Strings.toHexString(msg.sender)))
-        ) {
-            revert InvalidSignature();
-        }
+        usedNonces[inviter][nonce] = true;
+        hasInvited[inviter][msg.sender] = true;
+        _invitees[inviter].push(msg.sender);
 
-        bytes32 structHash = keccak256(
-            abi.encode(INVITE_TYPEHASH, inviter, keccak256(bytes(message)))
-        );
-        bytes32 hash = _hashTypedDataV4(structHash);
+        emit UserInvited(inviter, msg.sender, nonce);
+    }
 
-        if (!SignatureChecker.isValidSignatureNow(inviter, hash, signature)) {
-            // Try matching against EthSignedMessageHash (personal_sign)
-            bytes32 ethSignedHash = MessageHashUtils.toEthSignedMessageHash(
-                bytes(message)
-            );
-            if (
-                !SignatureChecker.isValidSignatureNow(
-                    inviter,
-                    ethSignedHash,
-                    signature
-                )
-            ) {
-                revert InvalidSignature();
-            }
-        }
-
-        invitedBy[msg.sender] = inviter;
-        emit UserInvited(msg.sender, inviter);
+    /**
+     * @notice Returns all addresses that have accepted an invite from the given inviter.
+     */
+    function getInvitees(address inviter) external view returns (address[] memory) {
+        return _invitees[inviter];
     }
 
     /**
@@ -632,6 +655,16 @@ contract SocietyProtocolBadges is
         uint256 id
     ) external view returns (uint256[] memory) {
         return canBurn[id];
+    }
+
+    /// @notice Returns true if the badge was created as a community-owned badge via the registry.
+    function getIsCommunityBadge(uint256 id) external view returns (bool) {
+        return badges[id].isCommunityBadge;
+    }
+
+    /// @notice Returns true if a badge with the given ID has been created.
+    function badgeExists(uint256 id) external view returns (bool) {
+        return _badgeExists(id);
     }
 
     /**
@@ -649,6 +682,16 @@ contract SocietyProtocolBadges is
     ) internal override(ERC1155Upgradeable, ERC1155SupplyUpgradeable) {
         for (uint256 i = 0; i < ids.length; i++) {
             uint256 id = ids[i];
+
+            // Profile badges are strictly one-of-one.
+            // _profileMintLocked blocks reentrant extra mints during the ERC1155 callback window
+            // (when totalSupply is still 0 but the first mint is in progress).
+            // totalSupply >= 1 blocks any subsequent non-reentrant minting attempts.
+            if (isProfileBadge[id] && from == address(0)) {
+                if (totalSupply(id) >= 1 || _profileMintLocked[id]) revert ProfileMustBeUnique();
+                _profileMintLocked[id] = true;
+            }
+
             address hook = badges[id].hook;
 
             if (hook != address(0)) {
@@ -693,10 +736,10 @@ contract SocietyProtocolBadges is
                     rules = canTransfer[id];
                 }
 
-                // CommunityRegistry can mint isCommunity badges without permission checks
+                // CommunityRegistry can mint isCommunityBadge badges without permission checks
                 bool allowed = from == address(0)
                     && hasRole(COMMUNITY_MANAGER_ROLE, msg.sender)
-                    && badges[id].isCommunity;
+                    && badges[id].isCommunityBadge;
                 for (uint256 j = 0; j < rules.length; j++) {
                     uint256 rule = rules[j];
 
@@ -719,7 +762,7 @@ contract SocietyProtocolBadges is
                     }
                     if (rule >= STARTING_BADGE_ID) {
                         // User must hold the required badge effectively (hook check included)
-                        if (balanceOf(msg.sender, rule) > 0) {
+                        if (super.balanceOf(msg.sender, rule) > 0) {
                             allowed = true;
                             break;
                         }

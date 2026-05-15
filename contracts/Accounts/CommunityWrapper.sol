@@ -2,37 +2,35 @@
 pragma solidity 0.8.28;
 
 import "@openzeppelin/contracts-upgradeable/token/ERC20/ERC20Upgradeable.sol";
-import "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
 import "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
 import "@openzeppelin/contracts/token/ERC1155/IERC1155.sol";
 
 /**
  * @title CommunityWrapper
- * @notice A non-transferable ERC20 wrapper that returns a cumulative balance based on ERC1155 badge ownership.
- * @dev Balance is the sum of the account's balances for all required badge IDs.
- * @dev This contract is designed to be used with the Clones pattern.
+ * @notice A non-transferable ERC20 read adapter that exposes community membership as an ERC20 balance.
+ * @dev Balance is the sum of the account's ERC1155 balances across all configured badge IDs.
+ *      Holding any of the listed badges contributes to the balance — this is additive (sum), not conjunctive (AND).
+ *      Designed for use with Snapshot's erc20-balance-of strategy. Not a standard transferable token.
+ *      Deployed via the EIP-1167 Clones pattern.
  */
 contract CommunityWrapper is
     Initializable,
-    ERC20Upgradeable,
-    OwnableUpgradeable
+    ERC20Upgradeable
 {
     /// @notice The contract address of the SocietyProtocolBadges ERC1155.
     address public badgeContract;
-    /**
-     * @notice The list of badge IDs that a user must hold to have a balance in this wrapper.
-     * @dev A user must hold at least one of each listed ID to be considered a "member".
-     */
+    /// @notice The badge ID that grants admin rights over this wrapper. Whoever holds it is the manager.
+    ///         Set to 0 for immutable standalone governance wrappers (nobody can call setBadgeIds).
+    uint256 public managerBadgeId;
+    /// @notice The badge IDs whose balances are summed to produce a user's wrapper balance.
     uint256[] public allowedBadgeIds;
     /// @notice The maximum number of badge IDs that can be required for membership.
     uint256 public constant MAX_BADGES = 5;
 
-    /// @notice Error thrown when trying to add more than MAX_BADGES to the requirement list.
+    /// @notice Caller does not hold the creator badge for this wrapper.
+    error Unauthorized();
+    /// @notice New badge list exceeds the MAX_BADGES cap.
     error MaxBadgesReached();
-    /// @notice Error thrown when attempting to add a badge ID that is already in the list.
-    error BadgeAlreadyAdded();
-    /// @notice Error thrown when trying to remove a badge ID that is not in the requirement list.
-    error BadgeNotFound();
     /// @notice Error thrown when a transfer is attempted (all transfers are disabled).
     error TransfersDisabled();
 
@@ -41,32 +39,56 @@ contract CommunityWrapper is
         _disableInitializers();
     }
 
+    modifier onlyManager() {
+        if (IERC1155(badgeContract).balanceOf(msg.sender, managerBadgeId) == 0) revert Unauthorized();
+        _;
+    }
+
     /**
      * @notice Initializes the wrapper as a clone.
      * @param name The ERC20 name for this community wrapper (e.g., "Developer Community").
      * @param symbol The ERC20 symbol (e.g., "DEVC").
      * @param _badgeContract The address of the main Badge contract.
      * @param _initialBadgeIds The initial list of badge IDs required for membership.
-     * @param _owner The address that will have administrative rights over this wrapper.
+     * @param _managerBadgeId The badge ID whose holder has admin rights. Ownership follows the badge.
+     *                        Pass 0 for an immutable governance wrapper — nobody can call setBadgeIds.
      */
     function initialize(
         string memory name,
         string memory symbol,
         address _badgeContract,
         uint256[] memory _initialBadgeIds,
-        address _owner
+        uint256 _managerBadgeId
     ) public initializer {
         __ERC20_init(name, symbol);
-        __Ownable_init(_owner);
 
         require(_badgeContract != address(0), "Invalid badge contract");
         if (_initialBadgeIds.length > MAX_BADGES) revert MaxBadgesReached();
 
         badgeContract = _badgeContract;
+        managerBadgeId = _managerBadgeId;
 
-        // Deduplicate initial badge IDs (same logic as addBadgeId)
+        // Deduplicate initial badge IDs
         for (uint256 i = 0; i < _initialBadgeIds.length; i++) {
             uint256 id = _initialBadgeIds[i];
+            bool found = false;
+            for (uint256 j = 0; j < allowedBadgeIds.length; j++) {
+                if (allowedBadgeIds[j] == id) { found = true; break; }
+            }
+            if (!found) allowedBadgeIds.push(id);
+        }
+    }
+
+    /**
+     * @notice Replaces the entire membership badge list.
+     * @dev Duplicates in the input are silently ignored. Only callable by the manager badge holder.
+     * @param newBadgeIds The new set of badge IDs required for membership.
+     */
+    function setBadgeIds(uint256[] calldata newBadgeIds) external onlyManager {
+        if (newBadgeIds.length > MAX_BADGES) revert MaxBadgesReached();
+        delete allowedBadgeIds;
+        for (uint256 i = 0; i < newBadgeIds.length; i++) {
+            uint256 id = newBadgeIds[i];
             bool found = false;
             for (uint256 j = 0; j < allowedBadgeIds.length; j++) {
                 if (allowedBadgeIds[j] == id) { found = true; break; }
@@ -89,39 +111,6 @@ contract CommunityWrapper is
             total += IERC1155(badgeContract).balanceOf(account, allowedBadgeIds[i]);
         }
         return total;
-    }
-
-    /**
-     * @notice Adds a new badge ID to the membership requirement list.
-     * @dev Only callable by the wrapper owner.
-     * @param badgeId The new badge ID to require.
-     */
-    function addBadgeId(uint256 badgeId) external onlyOwner {
-        if (allowedBadgeIds.length >= MAX_BADGES) revert MaxBadgesReached();
-
-        uint256 length = allowedBadgeIds.length;
-        for (uint256 i = 0; i < length; i++) {
-            if (allowedBadgeIds[i] == badgeId) revert BadgeAlreadyAdded();
-        }
-
-        allowedBadgeIds.push(badgeId);
-    }
-
-    /**
-     * @notice Removes a badge ID from the membership requirement list.
-     * @dev Only callable by the wrapper owner.
-     * @param badgeId The badge ID to remove.
-     */
-    function removeBadgeId(uint256 badgeId) external onlyOwner {
-        uint256 length = allowedBadgeIds.length;
-        for (uint256 i = 0; i < length; i++) {
-            if (allowedBadgeIds[i] == badgeId) {
-                allowedBadgeIds[i] = allowedBadgeIds[length - 1];
-                allowedBadgeIds.pop();
-                return;
-            }
-        }
-        revert BadgeNotFound();
     }
 
     /**
@@ -157,6 +146,14 @@ contract CommunityWrapper is
         address,
         uint256
     ) public pure override returns (bool) {
+        revert TransfersDisabled();
+    }
+
+    /**
+     * @notice Approvals are disabled since transfers are disabled.
+     * @dev Always reverts with `TransfersDisabled`.
+     */
+    function approve(address, uint256) public pure override returns (bool) {
         revert TransfersDisabled();
     }
 }
