@@ -1,0 +1,258 @@
+{
+  "version": "1.0",
+  "chainId": "11155111",
+  "createdAt": 1792416165703,
+  "meta": {
+    "name": "Outpost smart account migration ROLLBACK (sepolia)",
+    "description": "Undo the migration batch: mint the moved badges back to each old wallet and burn what was minted from its Light Account. Deployed Light Accounts stay deployed.",
+    "txBuilderVersion": "1.16.5",
+    "createdFromSafeAddress": "0xCAa140d9a1B714Bf2B8929f2571BC283669935d4",
+    "createdFromOwnerAddress": ""
+  },
+  "transactions": [
+    {
+      "to": "0x12406bB6d11Cb641e100F1d8595c0C5e63F0bD47",
+      "value": "0",
+      "data": "0x731133e90000000000000000000000000ced165c98f85677fdfc86e8ddff756f86cc77b60000000000000000000000000000000000000000000000000000000000000045000000000000000000000000000000000000000000000000000000000000000100000000000000000000000000000000000000000000000000000000000000800000000000000000000000000000000000000000000000000000000000000000",
+      "contractMethod": {
+        "inputs": [
+          {
+            "name": "to",
+            "type": "address"
+          },
+          {
+            "name": "id",
+            "type": "uint256"
+          },
+          {
+            "name": "amount",
+            "type": "uint256"
+          },
+          {
+            "name": "data",
+            "type": "bytes"
+          }
+        ],
+        "name": "mint",
+        "payable": false
+      },
+      "contractInputsValues": {
+        "to": "0x0Ced165c98f85677fdfC86E8dDfF756F86cC77B6",
+        "id": "69",
+        "amount": "1",
+        "data": "0x"
+      }
+    },
+    {
+      "to": "0x12406bB6d11Cb641e100F1d8595c0C5e63F0bD47",
+      "value": "0",
+      "data": "0xf5298aca00000000000000000000000067c515e9e22c41f1838f50f8b5a5136570a2929b00000000000000000000000000000000000000000000000000000000000000450000000000000000000000000000000000000000000000000000000000000001",
+      "contractMethod": {
+        "inputs": [
+          {
+            "name": "from",
+            "type": "address"
+          },
+          {
+            "name": "id",
+            "type": "uint256"
+          },
+          {
+            "name": "value",
+            "type": "uint256"
+          }
+        ],
+        "name": "burn",
+        "payable": false
+      },
+      "contractInputsValues": {
+        "from": "0x67c515E9E22C41f1838f50f8b5a5136570a2929B",
+        "id": "69",
+        "value": "1"
+      }
+    },
+    {
+      "to": "0x12406bB6d11Cb641e100F1d8595c0C5e63F0bD47",
+      "value": "0",
+      "data": "0x731133e90000000000000000000000000ced165c98f85677fdfc86e8ddff756f86cc77b60000000000000000000000000000000000000000000000000000000000000046000000000000000000000000000000000000000000000000000000000000000100000000000000000000000000000000000000000000000000000000000000800000000000000000000000000000000000000000000000000000000000000000",
+      "contractMethod": {
+        "inputs": [
+          {
+            "name": "to",
+            "type": "address"
+          },
+          {
+            "name": "id",
+            "type": "uint256"
+          },
+          {
+            "name": "amount",
+            "type": "uint256"
+          },
+          {
+            "name": "data",
+            "type": "bytes"
+          }
+        ],
+        "name": "mint",
+        "payable": false
+      },
+      "contractInputsValues": {
+        "to": "0x0Ced165c98f85677fdfC86E8dDfF756F86cC77B6",
+        "id": "70",
+        "amount": "1",
+        "data": "0x"
+      }
+    },
+    {
+      "to": "0x12406bB6d11Cb641e100F1d8595c0C5e63F0bD47",
+      "value": "0",
+      "data": "0xf5298aca00000000000000000000000067c515e9e22c41f1838f50f8b5a5136570a2929b00000000000000000000000000000000000000000000000000000000000000460000000000000000000000000000000000000000000000000000000000000001",
+      "contractMethod": {
+        "inputs": [
+          {
+            "name": "from",
+            "type": "address"
+          },
+          {
+            "name": "id",
+            "type": "uint256"
+          },
+          {
+            "name": "value",
+            "type": "uint256"
+          }
+        ],
+        "name": "burn",
+        "payable": false
+      },
+      "contractInputsValues": {
+        "from": "0x67c515E9E22C41f1838f50f8b5a5136570a2929B",
+        "id": "70",
+        "value": "1"
+      }
+    },
+    {
+      "to": "0x12406bB6d11Cb641e100F1d8595c0C5e63F0bD47",
+      "value": "0",
+      "data": "0x731133e9000000000000000000000000fce3ffd5cdeb831f0b0941da12e7248a5c1fe7a60000000000000000000000000000000000000000000000000000000000000045000000000000000000000000000000000000000000000000000000000000000100000000000000000000000000000000000000000000000000000000000000800000000000000000000000000000000000000000000000000000000000000000",
+      "contractMethod": {
+        "inputs": [
+          {
+            "name": "to",
+            "type": "address"
+          },
+          {
+            "name": "id",
+            "type": "uint256"
+          },
+          {
+            "name": "amount",
+            "type": "uint256"
+          },
+          {
+            "name": "data",
+            "type": "bytes"
+          }
+        ],
+        "name": "mint",
+        "payable": false
+      },
+      "contractInputsValues": {
+        "to": "0xFCE3Ffd5cdeb831F0B0941Da12E7248a5c1Fe7a6",
+        "id": "69",
+        "amount": "1",
+        "data": "0x"
+      }
+    },
+    {
+      "to": "0x12406bB6d11Cb641e100F1d8595c0C5e63F0bD47",
+      "value": "0",
+      "data": "0xf5298aca00000000000000000000000097befc769e37b59eb2055d8a8a9b2591d86a8e9e00000000000000000000000000000000000000000000000000000000000000450000000000000000000000000000000000000000000000000000000000000001",
+      "contractMethod": {
+        "inputs": [
+          {
+            "name": "from",
+            "type": "address"
+          },
+          {
+            "name": "id",
+            "type": "uint256"
+          },
+          {
+            "name": "value",
+            "type": "uint256"
+          }
+        ],
+        "name": "burn",
+        "payable": false
+      },
+      "contractInputsValues": {
+        "from": "0x97bEfC769E37B59EB2055D8a8A9B2591d86a8E9E",
+        "id": "69",
+        "value": "1"
+      }
+    },
+    {
+      "to": "0x12406bB6d11Cb641e100F1d8595c0C5e63F0bD47",
+      "value": "0",
+      "data": "0x731133e90000000000000000000000007463c4f79cd84c920c559ce189855a1bf44d8df00000000000000000000000000000000000000000000000000000000000000046000000000000000000000000000000000000000000000000000000000000000100000000000000000000000000000000000000000000000000000000000000800000000000000000000000000000000000000000000000000000000000000000",
+      "contractMethod": {
+        "inputs": [
+          {
+            "name": "to",
+            "type": "address"
+          },
+          {
+            "name": "id",
+            "type": "uint256"
+          },
+          {
+            "name": "amount",
+            "type": "uint256"
+          },
+          {
+            "name": "data",
+            "type": "bytes"
+          }
+        ],
+        "name": "mint",
+        "payable": false
+      },
+      "contractInputsValues": {
+        "to": "0x7463c4F79cD84C920c559cE189855a1bf44D8dF0",
+        "id": "70",
+        "amount": "1",
+        "data": "0x"
+      }
+    },
+    {
+      "to": "0x12406bB6d11Cb641e100F1d8595c0C5e63F0bD47",
+      "value": "0",
+      "data": "0xf5298aca00000000000000000000000052cd8450827a24a0243161446bea7202e500106f00000000000000000000000000000000000000000000000000000000000000460000000000000000000000000000000000000000000000000000000000000001",
+      "contractMethod": {
+        "inputs": [
+          {
+            "name": "from",
+            "type": "address"
+          },
+          {
+            "name": "id",
+            "type": "uint256"
+          },
+          {
+            "name": "value",
+            "type": "uint256"
+          }
+        ],
+        "name": "burn",
+        "payable": false
+      },
+      "contractInputsValues": {
+        "from": "0x52Cd8450827a24a0243161446bEa7202E500106F",
+        "id": "70",
+        "value": "1"
+      }
+    }
+  ]
+}
