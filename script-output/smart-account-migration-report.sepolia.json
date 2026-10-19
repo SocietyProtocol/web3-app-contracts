@@ -1,0 +1,396 @@
+{
+  "chain": "sepolia",
+  "chainId": 11155111,
+  "safe": "0xCAa140d9a1B714Bf2B8929f2571BC283669935d4",
+  "badges": "0x12406bB6d11Cb641e100F1d8595c0C5e63F0bD47",
+  "factory": "0x0000000000400CdFef5E2714E63d8040b700BC24",
+  "implementation": "0x8E8e658E22B12ada97B402fF0b044D6A325013C7",
+  "scannedBlocks": {
+    "from": "10845618",
+    "to": "11948436"
+  },
+  "nextTokenId": "76",
+  "profileCount": 11,
+  "safeHeldBadges": [
+    "68"
+  ],
+  "migratableBadges": [
+    "69",
+    "70"
+  ],
+  "badgesOverridden": false,
+  "notMigratable": {
+    "11": [
+      "community",
+      "Safe cannot mint",
+      "Safe cannot burn"
+    ],
+    "12": [
+      "community",
+      "Safe cannot mint",
+      "Safe cannot burn"
+    ],
+    "13": [
+      "community",
+      "Safe cannot mint",
+      "Safe cannot burn"
+    ],
+    "14": [
+      "community",
+      "Safe cannot mint",
+      "Safe cannot burn"
+    ],
+    "15": [
+      "community",
+      "Safe cannot mint",
+      "Safe cannot burn"
+    ],
+    "16": [
+      "community",
+      "Safe cannot mint",
+      "Safe cannot burn"
+    ],
+    "22": [
+      "community",
+      "Safe cannot mint",
+      "Safe cannot burn"
+    ],
+    "23": [
+      "community",
+      "Safe cannot mint",
+      "Safe cannot burn"
+    ],
+    "24": [
+      "community",
+      "Safe cannot mint",
+      "Safe cannot burn"
+    ],
+    "25": [
+      "Safe cannot mint",
+      "Safe cannot burn"
+    ],
+    "27": [
+      "community",
+      "Safe cannot mint",
+      "Safe cannot burn"
+    ],
+    "28": [
+      "community",
+      "Safe cannot mint",
+      "Safe cannot burn"
+    ],
+    "29": [
+      "community",
+      "Safe cannot mint",
+      "Safe cannot burn"
+    ],
+    "30": [
+      "community",
+      "Safe cannot mint",
+      "Safe cannot burn"
+    ],
+    "31": [
+      "Safe cannot mint",
+      "Safe cannot burn"
+    ],
+    "33": [
+      "community",
+      "Safe cannot mint",
+      "Safe cannot burn"
+    ],
+    "34": [
+      "community",
+      "Safe cannot mint",
+      "Safe cannot burn"
+    ],
+    "35": [
+      "community",
+      "Safe cannot mint",
+      "Safe cannot burn"
+    ],
+    "36": [
+      "community",
+      "Safe cannot mint",
+      "Safe cannot burn"
+    ],
+    "37": [
+      "community",
+      "Safe cannot mint",
+      "Safe cannot burn"
+    ],
+    "38": [
+      "community",
+      "Safe cannot mint",
+      "Safe cannot burn"
+    ],
+    "39": [
+      "community",
+      "Safe cannot mint",
+      "Safe cannot burn"
+    ],
+    "40": [
+      "community",
+      "Safe cannot mint",
+      "Safe cannot burn"
+    ],
+    "41": [
+      "community",
+      "Safe cannot mint",
+      "Safe cannot burn"
+    ],
+    "43": [
+      "Safe cannot mint",
+      "Safe cannot burn"
+    ],
+    "44": [
+      "Safe cannot mint",
+      "Safe cannot burn"
+    ],
+    "45": [
+      "Safe cannot mint",
+      "Safe cannot burn"
+    ],
+    "46": [
+      "Safe cannot mint",
+      "Safe cannot burn"
+    ],
+    "47": [
+      "community",
+      "Safe cannot mint",
+      "Safe cannot burn"
+    ],
+    "48": [
+      "community",
+      "Safe cannot mint",
+      "Safe cannot burn"
+    ],
+    "49": [
+      "community",
+      "Safe cannot mint",
+      "Safe cannot burn"
+    ],
+    "50": [
+      "Safe cannot mint",
+      "Safe cannot burn"
+    ],
+    "51": [
+      "Safe cannot mint",
+      "Safe cannot burn"
+    ],
+    "52": [
+      "Safe cannot mint",
+      "Safe cannot burn"
+    ],
+    "53": [
+      "Safe cannot mint",
+      "Safe cannot burn"
+    ],
+    "54": [
+      "Safe cannot mint",
+      "Safe cannot burn"
+    ],
+    "55": [
+      "Safe cannot mint",
+      "Safe cannot burn"
+    ],
+    "56": [
+      "Safe cannot mint",
+      "Safe cannot burn"
+    ],
+    "57": [
+      "Safe cannot mint",
+      "Safe cannot burn"
+    ],
+    "58": [
+      "Safe cannot mint",
+      "Safe cannot burn"
+    ],
+    "59": [
+      "Safe cannot mint",
+      "Safe cannot burn"
+    ],
+    "60": [
+      "Safe cannot mint",
+      "Safe cannot burn"
+    ],
+    "61": [
+      "Safe cannot mint",
+      "Safe cannot burn"
+    ],
+    "62": [
+      "Safe cannot mint",
+      "Safe cannot burn"
+    ],
+    "63": [
+      "Safe cannot mint",
+      "Safe cannot burn"
+    ],
+    "64": [
+      "Safe cannot mint",
+      "Safe cannot burn"
+    ],
+    "65": [
+      "Safe cannot mint",
+      "Safe cannot burn"
+    ],
+    "66": [
+      "Safe cannot mint",
+      "Safe cannot burn"
+    ],
+    "67": [
+      "Safe cannot mint",
+      "Safe cannot burn"
+    ],
+    "68": [
+      "held by the Safe",
+      "Safe cannot mint",
+      "Safe cannot burn"
+    ],
+    "74": [
+      "community",
+      "Safe cannot mint",
+      "Safe cannot burn"
+    ],
+    "75": [
+      "community",
+      "Safe cannot mint",
+      "Safe cannot burn"
+    ],
+    "76": [
+      "community",
+      "Safe cannot mint",
+      "Safe cannot burn"
+    ]
+  },
+  "memberCount": 11,
+  "transactionCount": 19,
+  "rollbackTransactionCount": 8,
+  "batches": [
+    "safe-smart-account-migration.sepolia.json"
+  ],
+  "rollbackBatches": [
+    "safe-smart-account-migration.rollback.sepolia.json"
+  ],
+  "skippedContracts": [],
+  "notMoved": [
+    "Profile badges cannot be burned or transferred.",
+    "Community badges are minted by the community manager, not the Safe.",
+    "Hooked badges (e.g. VIP, following the SPEC lock) are decided by their hook.",
+    "Badges the Safe holds stay where they are.",
+    "Credential badges other badges depend on (Security Council 12) are moved by their holders.",
+    "SPEC, VIP locks, and ETH stay on the old wallet."
+  ],
+  "members": [
+    {
+      "eoa": "0x31C2cb2cd72a0a35Bf1839a2e0d383566bf904b0",
+      "smart": "0x6bD19C6B7914Cd5D479F66d6d54713770FbF5c99",
+      "profileId": "17",
+      "smartDeployed": false,
+      "batch": 1,
+      "moved": []
+    },
+    {
+      "eoa": "0xFB338C5fE584c026270e5DeD1C2e0AcA786a22fe",
+      "smart": "0x1a1feF882Be19424b94dC257ae28199f7C6a3BB2",
+      "profileId": "18",
+      "smartDeployed": false,
+      "batch": 1,
+      "moved": []
+    },
+    {
+      "eoa": "0x9ba704115F0ed3a431A025ffa0525fDD1D507C3c",
+      "smart": "0xA47f4D7D2FAbDbfDCe865501ADc55a2b370c88cb",
+      "profileId": "19",
+      "smartDeployed": false,
+      "batch": 1,
+      "moved": []
+    },
+    {
+      "eoa": "0x51Bd128Eb1F801cE41910001589D41D452Bd6eEb",
+      "smart": "0x04F23204ad3f9A55338F9EBbF7805633D694C0B4",
+      "profileId": "20",
+      "smartDeployed": false,
+      "batch": 1,
+      "moved": []
+    },
+    {
+      "eoa": "0x14526E1d2Ee669ebB927064Abc29d416c78fdc3c",
+      "smart": "0x9958Cb9D477Ff97550ee87A1181F7d012AB663f2",
+      "profileId": "21",
+      "smartDeployed": false,
+      "batch": 1,
+      "moved": []
+    },
+    {
+      "eoa": "0x69904ff6d6100799344E5C9A2806936318F6ba4f",
+      "smart": "0x1Cef7364B820fAaF867e47810ee2fDAdbeeDb0F4",
+      "profileId": "26",
+      "smartDeployed": false,
+      "batch": 1,
+      "moved": []
+    },
+    {
+      "eoa": "0x38B9BE9b04923DD8658172c5dcdF873b01E8041F",
+      "smart": "0x6A01FC14a141f92BfB3950C4cfAac5AC5a25e3be",
+      "profileId": "32",
+      "smartDeployed": false,
+      "batch": 1,
+      "moved": []
+    },
+    {
+      "eoa": "0x2e468914660439F879721cAffAd710Acdc0A676B",
+      "smart": "0x79f450B82d6E05E5823efb82172E5D98bDc2ea2e",
+      "profileId": "42",
+      "smartDeployed": false,
+      "batch": 1,
+      "moved": []
+    },
+    {
+      "eoa": "0x0Ced165c98f85677fdfC86E8dDfF756F86cC77B6",
+      "smart": "0x67c515E9E22C41f1838f50f8b5a5136570a2929B",
+      "profileId": "71",
+      "smartDeployed": false,
+      "batch": 1,
+      "moved": [
+        {
+          "id": "69",
+          "amount": "1",
+          "minted": "1"
+        },
+        {
+          "id": "70",
+          "amount": "1",
+          "minted": "1"
+        }
+      ]
+    },
+    {
+      "eoa": "0xFCE3Ffd5cdeb831F0B0941Da12E7248a5c1Fe7a6",
+      "smart": "0x97bEfC769E37B59EB2055D8a8A9B2591d86a8E9E",
+      "profileId": "72",
+      "smartDeployed": false,
+      "batch": 1,
+      "moved": [
+        {
+          "id": "69",
+          "amount": "1",
+          "minted": "1"
+        }
+      ]
+    },
+    {
+      "eoa": "0x7463c4F79cD84C920c559cE189855a1bf44D8dF0",
+      "smart": "0x52Cd8450827a24a0243161446bEa7202E500106F",
+      "profileId": "73",
+      "smartDeployed": false,
+      "batch": 1,
+      "moved": [
+        {
+          "id": "70",
+          "amount": "1",
+          "minted": "1"
+        }
+      ]
+    }
+  ]
+}
