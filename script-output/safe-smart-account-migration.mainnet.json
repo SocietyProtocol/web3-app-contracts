@@ -1,11 +1,13 @@
 {
   "version": "1.0",
   "chainId": "1",
-  "createdAt": 1792074825875,
+  "createdAt": 1792412085120,
   "meta": {
-    "name": "Outpost smart account migration",
-    "description": "Deploy each member Light Account, mint DAO-movable badges onto it, and burn those badges from the old wallet. Profiles, VIP, SPEC, and community badges are not included.",
-    "txBuilderVersion": "1.16.5"
+    "name": "Outpost smart account migration (mainnet)",
+    "description": "Deploy each member Light Account, mint Safe-movable badges onto it, and burn those badges from the old wallet. Profiles, community, hooked, and Safe-held badges are not included.",
+    "txBuilderVersion": "1.16.5",
+    "createdFromSafeAddress": "0xdfdC9DBfDCd87F79636Ef8008B2Ccc5050F27579",
+    "createdFromOwnerAddress": ""
   },
   "transactions": [
     {
@@ -1750,6 +1752,67 @@
       }
     },
     {
+      "to": "0x2313C0cDdc233c92d16c2cfE17DF5fDCcE556763",
+      "value": "0",
+      "data": "0x731133e9000000000000000000000000674d5e89e5e30df76a6d38734ccee61cca367a770000000000000000000000000000000000000000000000000000000000000032000000000000000000000000000000000000000000000000000000000000000100000000000000000000000000000000000000000000000000000000000000800000000000000000000000000000000000000000000000000000000000000000",
+      "contractMethod": {
+        "inputs": [
+          {
+            "name": "to",
+            "type": "address"
+          },
+          {
+            "name": "id",
+            "type": "uint256"
+          },
+          {
+            "name": "amount",
+            "type": "uint256"
+          },
+          {
+            "name": "data",
+            "type": "bytes"
+          }
+        ],
+        "name": "mint",
+        "payable": false
+      },
+      "contractInputsValues": {
+        "to": "0x674D5e89E5E30DF76a6d38734ccEE61cca367A77",
+        "id": "50",
+        "amount": "1",
+        "data": "0x"
+      }
+    },
+    {
+      "to": "0x2313C0cDdc233c92d16c2cfE17DF5fDCcE556763",
+      "value": "0",
+      "data": "0xf5298aca000000000000000000000000cf08a5aa2066bff5aa7ccd7d7b7a47fb16fd17cd00000000000000000000000000000000000000000000000000000000000000320000000000000000000000000000000000000000000000000000000000000001",
+      "contractMethod": {
+        "inputs": [
+          {
+            "name": "from",
+            "type": "address"
+          },
+          {
+            "name": "id",
+            "type": "uint256"
+          },
+          {
+            "name": "value",
+            "type": "uint256"
+          }
+        ],
+        "name": "burn",
+        "payable": false
+      },
+      "contractInputsValues": {
+        "from": "0xcf08A5aA2066Bff5aA7cCD7D7b7a47fB16Fd17CD",
+        "id": "50",
+        "value": "1"
+      }
+    },
+    {
       "to": "0x0000000000400CdFef5E2714E63d8040b700BC24",
       "value": "0",
       "data": "0x5fbfb9cf000000000000000000000000e317a0b5769b49a157219a76733a48937bc2a5e50000000000000000000000000000000000000000000000000000000000000000",
@@ -1793,6 +1856,67 @@
       "contractInputsValues": {
         "owner": "0xa90Aa49a215BfF94c1F6b28b6dCFA49d5a907A2f",
         "salt": "0"
+      }
+    },
+    {
+      "to": "0x2313C0cDdc233c92d16c2cfE17DF5fDCcE556763",
+      "value": "0",
+      "data": "0x731133e900000000000000000000000029a3aea31e73c86a7adb9301fa4e5693697195a00000000000000000000000000000000000000000000000000000000000000032000000000000000000000000000000000000000000000000000000000000000100000000000000000000000000000000000000000000000000000000000000800000000000000000000000000000000000000000000000000000000000000000",
+      "contractMethod": {
+        "inputs": [
+          {
+            "name": "to",
+            "type": "address"
+          },
+          {
+            "name": "id",
+            "type": "uint256"
+          },
+          {
+            "name": "amount",
+            "type": "uint256"
+          },
+          {
+            "name": "data",
+            "type": "bytes"
+          }
+        ],
+        "name": "mint",
+        "payable": false
+      },
+      "contractInputsValues": {
+        "to": "0x29a3aeA31E73c86A7AdB9301fA4e5693697195a0",
+        "id": "50",
+        "amount": "1",
+        "data": "0x"
+      }
+    },
+    {
+      "to": "0x2313C0cDdc233c92d16c2cfE17DF5fDCcE556763",
+      "value": "0",
+      "data": "0xf5298aca000000000000000000000000a90aa49a215bff94c1f6b28b6dcfa49d5a907a2f00000000000000000000000000000000000000000000000000000000000000320000000000000000000000000000000000000000000000000000000000000001",
+      "contractMethod": {
+        "inputs": [
+          {
+            "name": "from",
+            "type": "address"
+          },
+          {
+            "name": "id",
+            "type": "uint256"
+          },
+          {
+            "name": "value",
+            "type": "uint256"
+          }
+        ],
+        "name": "burn",
+        "payable": false
+      },
+      "contractInputsValues": {
+        "from": "0xa90Aa49a215BfF94c1F6b28b6dCFA49d5a907A2f",
+        "id": "50",
+        "value": "1"
       }
     },
     {
@@ -2022,6 +2146,136 @@
       },
       "contractInputsValues": {
         "owner": "0x84c11998bc94072265CBe837c1D4890237F98E46",
+        "salt": "0"
+      }
+    },
+    {
+      "to": "0x0000000000400CdFef5E2714E63d8040b700BC24",
+      "value": "0",
+      "data": "0x5fbfb9cf0000000000000000000000001d7af3d1de21354bbffe7d22761aeddcbe71d2160000000000000000000000000000000000000000000000000000000000000000",
+      "contractMethod": {
+        "inputs": [
+          {
+            "name": "owner",
+            "type": "address"
+          },
+          {
+            "name": "salt",
+            "type": "uint256"
+          }
+        ],
+        "name": "createAccount",
+        "payable": false
+      },
+      "contractInputsValues": {
+        "owner": "0x1d7Af3d1de21354BBFFE7d22761AeDDCBE71D216",
+        "salt": "0"
+      }
+    },
+    {
+      "to": "0x2313C0cDdc233c92d16c2cfE17DF5fDCcE556763",
+      "value": "0",
+      "data": "0x731133e90000000000000000000000003dcc9632be6cf6e63fae7009949a185f4cd38c230000000000000000000000000000000000000000000000000000000000000032000000000000000000000000000000000000000000000000000000000000000200000000000000000000000000000000000000000000000000000000000000800000000000000000000000000000000000000000000000000000000000000000",
+      "contractMethod": {
+        "inputs": [
+          {
+            "name": "to",
+            "type": "address"
+          },
+          {
+            "name": "id",
+            "type": "uint256"
+          },
+          {
+            "name": "amount",
+            "type": "uint256"
+          },
+          {
+            "name": "data",
+            "type": "bytes"
+          }
+        ],
+        "name": "mint",
+        "payable": false
+      },
+      "contractInputsValues": {
+        "to": "0x3DCc9632be6CF6e63FaE7009949A185F4cd38C23",
+        "id": "50",
+        "amount": "2",
+        "data": "0x"
+      }
+    },
+    {
+      "to": "0x2313C0cDdc233c92d16c2cfE17DF5fDCcE556763",
+      "value": "0",
+      "data": "0xf5298aca0000000000000000000000001d7af3d1de21354bbffe7d22761aeddcbe71d21600000000000000000000000000000000000000000000000000000000000000320000000000000000000000000000000000000000000000000000000000000002",
+      "contractMethod": {
+        "inputs": [
+          {
+            "name": "from",
+            "type": "address"
+          },
+          {
+            "name": "id",
+            "type": "uint256"
+          },
+          {
+            "name": "value",
+            "type": "uint256"
+          }
+        ],
+        "name": "burn",
+        "payable": false
+      },
+      "contractInputsValues": {
+        "from": "0x1d7Af3d1de21354BBFFE7d22761AeDDCBE71D216",
+        "id": "50",
+        "value": "2"
+      }
+    },
+    {
+      "to": "0x0000000000400CdFef5E2714E63d8040b700BC24",
+      "value": "0",
+      "data": "0x5fbfb9cf000000000000000000000000aee413a9e640ce817e4ae024176fe8a4550104fd0000000000000000000000000000000000000000000000000000000000000000",
+      "contractMethod": {
+        "inputs": [
+          {
+            "name": "owner",
+            "type": "address"
+          },
+          {
+            "name": "salt",
+            "type": "uint256"
+          }
+        ],
+        "name": "createAccount",
+        "payable": false
+      },
+      "contractInputsValues": {
+        "owner": "0xAEE413a9E640Ce817E4aE024176fE8a4550104fD",
+        "salt": "0"
+      }
+    },
+    {
+      "to": "0x0000000000400CdFef5E2714E63d8040b700BC24",
+      "value": "0",
+      "data": "0x5fbfb9cf00000000000000000000000022453c3075fd36a702abc889bc3caefefe8a295e0000000000000000000000000000000000000000000000000000000000000000",
+      "contractMethod": {
+        "inputs": [
+          {
+            "name": "owner",
+            "type": "address"
+          },
+          {
+            "name": "salt",
+            "type": "uint256"
+          }
+        ],
+        "name": "createAccount",
+        "payable": false
+      },
+      "contractInputsValues": {
+        "owner": "0x22453c3075FD36A702AbC889bC3caEFEFe8A295e",
         "salt": "0"
       }
     }
